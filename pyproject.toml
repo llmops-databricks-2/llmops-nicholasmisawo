@@ -73,6 +73,10 @@ lint.ignore = [
     "C901", # too complex
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Databricks notebooks: exploratory cells, not a public API
+"notebooks/**" = ["D100", "ANN", "ERA001"]
+
 [tool.ruff.format]
 indent-style = "space"
 docstring-code-format = true
