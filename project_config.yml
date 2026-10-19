@@ -11,7 +11,7 @@ usage_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
 dev:
   catalog: "llmops_dev"
   schema: "nicholasmisawo"
-  volume: "arxiv_files"
+  volume: "fx_market_intel_files"
   llm_endpoint: "course_ops.gateway.chat"
   embedding_endpoint: "course_ops.gateway.embed"
   warehouse_id: "0e56acba898dad4a"
@@ -23,7 +23,7 @@ dev:
 acc:
   catalog: "llmops_acc"
   schema: "nicholasmisawo"
-  volume: "arxiv_files"
+  volume: "fx_market_intel_files"
   llm_endpoint: "course_ops.gateway.chat"
   embedding_endpoint: "course_ops.gateway.embed"
   warehouse_id: "0e56acba898dad4a"
@@ -35,7 +35,7 @@ acc:
 prd:
   catalog: "llmops_prd"
   schema: "nicholasmisawo"
-  volume: "arxiv_files"
+  volume: "fx_market_intel_files"
   llm_endpoint: "course_ops.gateway.chat"
   embedding_endpoint: "course_ops.gateway.embed"
   warehouse_id: "0e56acba898dad4a"

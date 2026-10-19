@@ -1,7 +1,7 @@
 [project]
-name = "arxiv-curator"
+name = "fx-market-intel"
 dynamic = ["version"]
-description = "Arxiv Curator - Shared utilities for LLMOps Course on Databricks"
+description = "Databricks LLMOps application for FX market intelligence"
 requires-python = "==3.12.*"
 dependencies = [
     "cffi==1.17.1",
@@ -38,7 +38,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where =["src"]
-include = ["arxiv_curator*"]
+include = ["fx_market_intel*"]
 
 [tool.setuptools.dynamic]
 version = { file = "version.txt" }
