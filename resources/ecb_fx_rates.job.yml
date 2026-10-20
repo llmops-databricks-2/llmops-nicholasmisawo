@@ -1,0 +1,31 @@
+# ECB EUR/USD Exchange Rates Ingestion
+#
+# Retrieves historical daily EUR/USD reference exchange rates from
+# the ECB Data Portal API and stores them in Unity Catalog Delta tables.
+# Supports FX trend analysis, return calculations, and examination
+# of exchange-rate movements around central bank communications.
+#
+# Runs as a Databricks serverless notebook task using the packaged
+# project wheel. The target environment (dev/acc/prd) determines the
+# catalog, schema, and configuration loaded from project_config.yml.
+# Job names are environment-specific to prevent deployment conflicts.
+
+resources:
+  jobs:
+    ecb_fx_rates:
+      name: ecb_fx_rates-${bundle.target}
+      budget_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: ecb_fx_rates
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/01_ingestion/02_ingest_ecb_fx_rates.py
+            base_parameters:
+              env: ${bundle.target}

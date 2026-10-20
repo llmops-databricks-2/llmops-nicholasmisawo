@@ -1,7 +1,7 @@
 [project]
-name = "arxiv-curator"
+name = "fx-market-intel"
 dynamic = ["version"]
-description = "Arxiv Curator - Shared utilities for LLMOps Course on Databricks"
+description = "Databricks LLMOps application for FX market intelligence"
 requires-python = "==3.12.*"
 dependencies = [
     "cffi==1.17.1",
@@ -23,7 +23,8 @@ dependencies = [
     "databricks-agents==1.12.0",
     "psycopg==3.3.2",
     "psycopg-pool==3.3.0",
-    "psycopg[binary]==3.3.2"
+    "psycopg[binary]==3.3.2",
+    "beautifulsoup4==4.15.0"
 ]
 
 [project.optional-dependencies]
@@ -38,7 +39,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where =["src"]
-include = ["arxiv_curator*"]
+include = ["fx_market_intel*"]
 
 [tool.setuptools.dynamic]
 version = { file = "version.txt" }
@@ -71,6 +72,10 @@ lint.ignore = [
     "E501", # line-too-long
     "C901", # too complex
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Databricks notebooks: exploratory cells, not a public API
+"notebooks/**" = ["D100", "ANN", "ERA001"]
 
 [tool.ruff.format]
 indent-style = "space"

@@ -1,0 +1,30 @@
+# BIS Central Bank Speeches Ingestion
+#
+# Ingests ECB and Federal Reserve speeches from the BIS dataset into
+# the target environment's Unity Catalog Delta table.
+# Supports monetary policy research and RAG-based speech retrieval.
+#
+# Runs as a Databricks serverless notebook task using the packaged
+# project wheel. The target environment (dev/acc/prd) determines the
+# catalog, schema, and configuration loaded from project_config.yml.
+# Job names are environment-specific to prevent deployment conflicts.
+
+resources:
+  jobs:
+    bis_central_bank_speeches:
+      name: bis_central_bank_speeches-${bundle.target}
+      budget_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: bis_central_bank_speeches
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/01_ingestion/01_ingest_bis_central_bank_speeches.py
+            base_parameters:
+              env: ${bundle.target}
