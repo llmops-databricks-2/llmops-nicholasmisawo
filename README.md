@@ -52,20 +52,26 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 
 ## 3. Data Pipelines
 
-| Job | Notebook | Unity Catalog table | Volume folder |
+The `bma_consultation_papers` job runs two serverless notebook tasks in sequence, both with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
+
+| Task | Notebook | Unity Catalog table | Volume folder |
 |---|---|---|---|
-| `bma_consultation_papers` | `01_ingest_bma_consultation_papers.py` | `bma_consultation_papers` | `consultation_paper_curator_files/bma/` |
+| `ingest_consultation_papers` | `01_ingest_consultation_papers.py` | `bma_consultation_papers` (raw) | — |
+| `curate_consultation_papers` | `02_curate_consultation_papers.py` | `consultation_papers` (curated) | `consultation_paper_curator_files/<source>/` |
 
-The job:
+**Ingest** fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and overwrites the raw table as the site returns it. It downloads nothing.
 
-- Runs as a serverless Databricks notebook task with the packaged project wheel installed.
-- Loads environment-specific settings from `project_config.yml`.
-- Fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories.
-- Tags each document with the site's category and topic/sector filters.
-- Downloads each source file to the volume as `<document_id>.<ext>`. It skips files already present and caps the run at `MAX_DOWNLOADS`, which is currently 5 while testing.
-- Overwrites the Delta table and reports data-quality checks.
+**Curate** applies the rules in `src/consultation_paper_curator/curation.py`:
 
-### Table schema: `bma_consultation_papers`
+- Keeps PDFs only. Spreadsheets (BSCR models, templates, response forms) are dropped.
+- Classifies each document as `consultation_paper`, `discussion_paper`, `stakeholder_letter`, `notice`, `guidance`, `legislation` or `other` from its title prefix, falling back to the filename.
+- Takes the publication date from the upload timestamp in the CDN filename, which is more reliable than the site's listed date. For re-uploaded files it uses the original timestamp.
+- Normalizes titles (dashes, quotes, repeated prefixes) and keeps one document per title, current over archived and then newest, recording the dropped ids in `superseded_ids`.
+- Only then downloads the curated papers to the volume as `<source>/<document_id>.pdf`. It skips files already present and caps new downloads at `MAX_DOWNLOADS`, currently 5 while testing.
+
+Whether a consultation is open is computed at query time (`comment_deadline >= current_date()`) rather than stored, so it never goes stale.
+
+### Raw table schema: `bma_consultation_papers`
 
 | Column | Type | Description |
 |---|---|---|
@@ -73,8 +79,7 @@ The job:
 | `title` | string | Document title |
 | `summary` | string | Card text, usually comment instructions |
 | `comment_deadline` | string | ISO date parsed from `summary`, if any |
-| `published` | long | Upload date as `yyyyMMdd` |
-| `uploaded_date` | string | Upload date (ISO) |
+| `uploaded_date` | string | Date listed on the site (ISO) |
 | `document_type` | string | `Regulatory Legislative Documents` |
 | `categories` | array\<string\> | e.g. `Discussion/Consultation Papers` |
 | `topics` | array\<string\> | Topic/sector filters, e.g. `Insurance`, `Digital Asset Business` |
@@ -85,7 +90,29 @@ The job:
 | `related_documents` | array\<string\> | CDN URLs from the "Related Document" menu |
 | `institution` / `source` | string | `BMA` / `bma` |
 | `ingestion_timestamp` | string | Run time (UTC ISO) |
-| `processed` | long | Download time as `yyyyMMddHHmm` |
+
+### Curated table schema: `consultation_papers`
+
+| Column | Type | Description |
+|---|---|---|
+| `document_id` | string | `<source>_<id>`, e.g. `bma_12871` |
+| `source` / `institution` | string | `bma` / `BMA` |
+| `title` | string | Normalized title |
+| `doc_kind` | string | `consultation_paper`, `discussion_paper`, `stakeholder_letter`, `notice`, `guidance`, `legislation` or `other` |
+| `file_type` | string | File extension, always `pdf` for now |
+| `file_url` | string | Direct CDN file URL |
+| `published_date` | date | Original upload date from the CDN filename, else `listed_date` |
+| `listed_date` | date | Date listed on the site |
+| `file_uploaded_at` | timestamp | Original upload timestamp from the CDN filename |
+| `comment_deadline` | date | Deadline parsed from the card text, if any |
+| `submission_note` | string | Card text, usually comment instructions (raw `summary`) |
+| `submission_emails` | array\<string\> | Email addresses in `submission_note` |
+| `topics` | array\<string\> | Topic/sector filters |
+| `is_archived` | boolean | Listed under the site's archive |
+| `related_documents` | array\<string\> | CDN URLs from the "Related Document" menu |
+| `superseded_ids` | array\<string\> | Ids of duplicates this row replaced |
+| `ingestion_timestamp` | string | Ingest run time (UTC ISO) |
+| `downloaded_at` | timestamp | When the file landed in the volume |
 | `volume_path` | string | File location in the volume |
 
 ## 4. Provisioned Databricks Resources
@@ -95,7 +122,7 @@ The job:
 | Development schema | `llmops_dev.nicholasmisawo` |
 | Acceptance schema | `llmops_acc.nicholasmisawo` |
 | Production schema | `llmops_prd.nicholasmisawo` |
-| Project document volume | `consultation_paper_curator_files` (created by the ingestion job) |
+| Project document volume | `consultation_paper_curator_files` (created by the curation task) |
 | SQL warehouse ID | `0e56acba898dad4a` |
 | Usage policy ID | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | Dev MLflow experiment | `/llmops/nicholasmisawo-dev` |
@@ -165,14 +192,17 @@ Additional branches or compute resources may increase costs.
 llmops-nicholasmisawo/
 ├── src/
 │   └── consultation_paper_curator/
-│       └── config.py
+│       ├── config.py
+│       └── curation.py
 ├── notebooks/
 │   └── 01_ingestion/
-│       └── 01_ingest_bma_consultation_papers.py
+│       ├── 01_ingest_consultation_papers.py
+│       └── 02_curate_consultation_papers.py
 ├── resources/
 │   └── bma_consultation_papers.job.yml
 ├── tests/
-│   └── test_config.py
+│   ├── test_config.py
+│   └── test_curation.py
 ├── .github/
 │   ├── workflows/
 │   │   └── ci.yml
@@ -187,8 +217,8 @@ llmops-nicholasmisawo/
 
 **Main components**
 
-- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt) and application logic.
-- `notebooks/01_ingestion/`: data ingestion pipelines, starting with BMA consultation papers.
+- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt), the curation rules, and application logic.
+- `notebooks/01_ingestion/`: data ingestion and curation pipelines, starting with BMA consultation papers.
 - `notebooks/02_processing/`: planned document extraction, cleaning, chunking, and preparation for embeddings.
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
@@ -196,7 +226,7 @@ llmops-nicholasmisawo/
 - `databricks.yml`: deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
 - `project_config.yml`: environment-specific catalog, schema, volume (`consultation_paper_curator_files`), model services, and warehouse settings.
 - `pyproject.toml` and `uv.lock`: Python dependencies and reproducible environment management.
-- `tests/`: automated tests, including configuration validation.
+- `tests/`: automated tests, including configuration validation and the curation rules.
 - `.github/workflows/ci.yml`: continuous integration for code-quality checks and tests.
 - `.github/CODEOWNERS`: pull-request ownership and review requirements.
 

@@ -1,20 +1,23 @@
 # Databricks notebook source
 
-import os
 import re
 import time
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
-from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from databricks.sdk.runtime import dbutils
 from loguru import logger
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, floor, when
+from pyspark.sql.functions import col, explode, substring, when
 from pyspark.sql.functions import sum as spark_sum
-from pyspark.sql.types import ArrayType, BooleanType, LongType, StringType, StructField, StructType
+from pyspark.sql.types import (
+    ArrayType,
+    BooleanType,
+    StringType,
+    StructField,
+    StructType,
+)
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -31,15 +34,11 @@ cfg = load_config("../../project_config.yml", env=env)
 
 CATALOG = cfg.catalog
 SCHEMA = cfg.schema
-VOLUME = cfg.volume
 TABLE_NAME = "bma_consultation_papers"
 table_path = f"{CATALOG}.{SCHEMA}.{TABLE_NAME}"
-volume_dir = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/bma"
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`")
-spark.sql(f"CREATE VOLUME IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.`{VOLUME}`")
-os.makedirs(volume_dir, exist_ok=True)
-logger.info(f"Schema {CATALOG}.{SCHEMA} and volume {volume_dir} ready")
+logger.info(f"Schema {CATALOG}.{SCHEMA} ready")
 
 # COMMAND ----------
 # Fetch BMA Consultation Paper Metadata
@@ -160,7 +159,6 @@ def parse_cards(html):
                 "title": title,
                 "summary": summary,
                 "comment_deadline": deadline.isoformat() if deadline else None,
-                "published": int(uploaded.strftime("%Y%m%d")) if uploaded else None,  # Long to match arXiv
                 "uploaded_date": uploaded.isoformat() if uploaded else None,
                 "document_type": DOCUMENT_TYPE[1],
                 "is_stakeholder_letter": title.lower().startswith("stakeholder letter"),
@@ -209,7 +207,12 @@ def fetch_bma_documents(
                 for doc in fetch_all(session, token, [category_id], archive=archived):
                     record = documents.setdefault(
                         doc["document_id"],
-                        {**doc, "categories": [], "topics": [], "is_archived": archived},
+                        {
+                            **doc,
+                            "categories": [],
+                            "topics": [],
+                            "is_archived": archived,
+                        },
                     )
                     if category_name not in record["categories"]:
                         record["categories"].append(category_name)
@@ -227,7 +230,7 @@ def fetch_bma_documents(
         logger.info(f"Tagged documents across {len(topic_labels)} topics")
 
     ingested_at = datetime.now(UTC).isoformat()
-    publications = sorted(documents.values(), key=lambda doc: doc["published"] or 0, reverse=True)
+    publications = sorted(documents.values(), key=lambda doc: doc["uploaded_date"] or "", reverse=True)
 
     for doc in publications:
         doc.update(
@@ -235,8 +238,6 @@ def fetch_bma_documents(
                 "institution": "BMA",
                 "source": "bma",
                 "ingestion_timestamp": ingested_at,
-                "processed": None,  # Set when the PDF lands in the volume
-                "volume_path": None,  # Set when the PDF lands in the volume
             }
         )
 
@@ -257,50 +258,6 @@ logger.info(f"Topics: {publications[0]['topics']}")
 logger.info(f"PDF URL: {publications[0]['pdf_url']}")
 
 # COMMAND ----------
-# Download Documents to the Unity Catalog Volume
-
-MAX_DOWNLOADS = 5  # Capped while testing; None = download everything
-
-
-def download_document(session, url, path):
-    """Stream a document to the volume; return True on success."""
-    try:
-        with session.get(url, timeout=120, stream=True) as response:
-            response.raise_for_status()
-            with open(path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=1 << 20):
-                    f.write(chunk)
-        return True
-    except (requests.RequestException, OSError) as exc:
-        logger.warning(f"Failed to download {url}: {exc}")
-        if os.path.exists(path):
-            os.remove(path)
-        return False
-
-
-downloaded = skipped = failed = 0
-
-with create_session() as session:
-    for doc in publications[:MAX_DOWNLOADS]:
-        # A few BMA "documents" are spreadsheets, so keep the source file's extension
-        extension = PurePosixPath(urlparse(doc["pdf_url"]).path).suffix.lower() or ".pdf"
-        path = f"{volume_dir}/{doc['document_id']}{extension}"
-
-        if os.path.exists(path):
-            skipped += 1
-        elif download_document(session, doc["pdf_url"], path):
-            downloaded += 1
-            time.sleep(1)
-        else:
-            failed += 1
-            continue
-
-        doc["volume_path"] = path
-        doc["processed"] = int(datetime.now(UTC).strftime("%Y%m%d%H%M"))  # Long to match arXiv
-
-logger.info(f"Documents downloaded: {downloaded}, already present: {skipped}, failed: {failed}")
-
-# COMMAND ----------
 # Create Delta Table in Unity Catalog
 
 schema = StructType(
@@ -309,7 +266,6 @@ schema = StructType(
         StructField("title", StringType(), False),
         StructField("summary", StringType(), True),
         StructField("comment_deadline", StringType(), True),
-        StructField("published", LongType(), True),  # Long to match arXiv (yyyyMMdd)
         StructField("uploaded_date", StringType(), True),
         StructField("document_type", StringType(), True),
         StructField("categories", ArrayType(StringType()), True),
@@ -323,8 +279,6 @@ schema = StructType(
         StructField("institution", StringType(), True),
         StructField("source", StringType(), True),
         StructField("ingestion_timestamp", StringType(), True),
-        StructField("processed", LongType(), True),
-        StructField("volume_path", StringType(), True),
     ]
 )
 
@@ -364,10 +318,10 @@ logger.info("Current vs archived:")
 papers_df.groupBy("is_archived").count().show()
 
 logger.info("Documents by year:")
-papers_df.groupBy(floor(col("published") / 10000).alias("year")).count().orderBy("year", ascending=False).show(30)
+papers_df.groupBy(substring("uploaded_date", 1, 4).alias("year")).count().orderBy("year", ascending=False).show(30)
 
 logger.info("Most recent documents:")
-papers_df.select("title", "uploaded_date", "comment_deadline").orderBy(col("published").desc_nulls_last()).show(
+papers_df.select("title", "uploaded_date", "comment_deadline").orderBy(col("uploaded_date").desc_nulls_last()).show(
     10, truncate=60
 )
 
@@ -375,9 +329,8 @@ papers_df.select("title", "uploaded_date", "comment_deadline").orderBy(col("publ
 # Data Quality Checks
 
 quality_df = papers_df.agg(
-    spark_sum(when(col("published").isNull(), 1).otherwise(0)).alias("missing_dates"),
+    spark_sum(when(col("uploaded_date").isNull(), 1).otherwise(0)).alias("missing_dates"),
     spark_sum(when(col("pdf_url").isNull(), 1).otherwise(0)).alias("missing_pdf_urls"),
-    spark_sum(when(col("volume_path").isNull(), 1).otherwise(0)).alias("missing_downloads"),
     spark_sum(when(col("topics").getItem(0).isNull(), 1).otherwise(0)).alias("untagged_topics"),
 )
 
