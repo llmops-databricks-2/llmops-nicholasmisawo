@@ -193,7 +193,12 @@ llmops-nicholasmisawo/
 ├── src/
 │   └── consultation_paper_curator/
 │       ├── config.py
-│       └── curation.py
+│       ├── curation.py        # rules that turn raw rows into curated papers
+│       ├── download.py        # download curated papers into the volume
+│       ├── http_client.py     # retrying HTTP session and file download
+│       ├── schemas.py         # Spark schemas of the raw and curated tables
+│       └── sources/
+│           └── bma.py         # BMA documents-centre scraper
 ├── notebooks/
 │   └── 01_ingestion/
 │       ├── 01_ingest_consultation_papers.py
@@ -201,8 +206,13 @@ llmops-nicholasmisawo/
 ├── resources/
 │   └── bma_consultation_papers.job.yml
 ├── tests/
+│   ├── fixtures/
+│   ├── conftest.py
+│   ├── test_bma_source.py
 │   ├── test_config.py
-│   └── test_curation.py
+│   ├── test_curation.py
+│   ├── test_download.py
+│   └── test_schemas.py
 ├── .github/
 │   ├── workflows/
 │   │   └── ci.yml
@@ -217,7 +227,7 @@ llmops-nicholasmisawo/
 
 **Main components**
 
-- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt), the curation rules, and application logic.
+- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt), source scrapers, curation rules, downloads, table schemas, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `RAW_SCHEMA`.
 - `notebooks/01_ingestion/`: data ingestion and curation pipelines, starting with BMA consultation papers.
 - `notebooks/02_processing/`: planned document extraction, cleaning, chunking, and preparation for embeddings.
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
@@ -226,7 +236,7 @@ llmops-nicholasmisawo/
 - `databricks.yml`: deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
 - `project_config.yml`: environment-specific catalog, schema, volume (`consultation_paper_curator_files`), model services, and warehouse settings.
 - `pyproject.toml` and `uv.lock`: Python dependencies and reproducible environment management.
-- `tests/`: automated tests, including configuration validation and the curation rules.
+- `tests/`: automated tests for configuration, the BMA card parser, curation rules, downloads, and schema/row consistency.
 - `.github/workflows/ci.yml`: continuous integration for code-quality checks and tests.
 - `.github/CODEOWNERS`: pull-request ownership and review requirements.
 

@@ -1,30 +1,18 @@
 # Databricks notebook source
 
-import os
-import time
 from collections import Counter
-from datetime import UTC, datetime
 
-import requests
 from databricks.sdk.runtime import dbutils
 from loguru import logger
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, current_date, size, when
 from pyspark.sql.functions import sum as spark_sum
-from pyspark.sql.types import (
-    ArrayType,
-    BooleanType,
-    DateType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-)
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from consultation_paper_curator.config import load_config
 from consultation_paper_curator.curation import curate, curate_document
+from consultation_paper_curator.download import download_papers, with_storage
+from consultation_paper_curator.http_client import create_session
+from consultation_paper_curator.schemas import CURATED_SCHEMA
 
 # COMMAND ----------
 # Create Spark session and load configuration
@@ -64,85 +52,17 @@ MAX_DOWNLOADS = 5  # Capped while testing; None = download everything
 
 spark.sql(f"CREATE VOLUME IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.`{VOLUME}`")
 
-
-def create_session():
-    """Create HTTP session with retries."""
-    session = requests.Session()
-    retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
-    session.mount("https://", HTTPAdapter(max_retries=retry))
-    session.headers.update({"User-Agent": "ConsultationPaperCurator/1.0"})
-    return session
-
-
-def download_document(session, url, path):
-    """Stream a document to the volume; return True on success."""
-    try:
-        with session.get(url, timeout=120, stream=True) as response:
-            response.raise_for_status()
-            with open(path, "wb") as f:
-                f.writelines(response.iter_content(chunk_size=1 << 20))
-        return True
-    except (requests.RequestException, OSError) as exc:
-        logger.warning(f"Failed to download {url}: {exc}")
-        if os.path.exists(path):
-            os.remove(path)
-        return False
-
-
-downloaded = skipped = failed = 0
-
 with create_session() as session:
-    for paper in papers:
-        paper["volume_path"] = paper["downloaded_at"] = None
-        source_dir = f"{volume_root}/{paper['source']}"
-        os.makedirs(source_dir, exist_ok=True)
-        path = f"{source_dir}/{paper['document_id']}.{paper['file_type']}"
+    stored, stats = download_papers(papers, volume_root, session, max_downloads=MAX_DOWNLOADS)
 
-        if os.path.exists(path):
-            skipped += 1
-        elif MAX_DOWNLOADS is not None and downloaded + failed >= MAX_DOWNLOADS:
-            continue
-        elif download_document(session, paper["file_url"], path):
-            downloaded += 1
-            time.sleep(1)
-        else:
-            failed += 1
-            continue
+logger.info(f"Papers downloaded: {stats.downloaded}, already present: {stats.skipped}, failed: {stats.failed}")
 
-        paper["volume_path"] = path
-        paper["downloaded_at"] = datetime.fromtimestamp(os.path.getmtime(path), UTC)
-
-logger.info(f"Papers downloaded: {downloaded}, already present: {skipped}, failed: {failed}")
+rows = with_storage(papers, stored)
 
 # COMMAND ----------
 # Create Curated Delta Table in Unity Catalog
 
-schema = StructType(
-    [
-        StructField("document_id", StringType(), False),
-        StructField("source", StringType(), True),
-        StructField("institution", StringType(), True),
-        StructField("title", StringType(), False),
-        StructField("doc_kind", StringType(), False),
-        StructField("file_type", StringType(), True),
-        StructField("file_url", StringType(), True),
-        StructField("published_date", DateType(), True),
-        StructField("listed_date", DateType(), True),
-        StructField("file_uploaded_at", TimestampType(), True),
-        StructField("comment_deadline", DateType(), True),
-        StructField("submission_note", StringType(), True),
-        StructField("submission_emails", ArrayType(StringType()), True),
-        StructField("topics", ArrayType(StringType()), True),
-        StructField("is_archived", BooleanType(), True),
-        StructField("related_documents", ArrayType(StringType()), True),
-        StructField("superseded_ids", ArrayType(StringType()), True),
-        StructField("ingestion_timestamp", StringType(), True),
-        StructField("downloaded_at", TimestampType(), True),
-        StructField("volume_path", StringType(), True),
-    ]
-)
-
-df = spark.createDataFrame(papers, schema=schema)
+df = spark.createDataFrame(rows, schema=CURATED_SCHEMA)
 
 df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(CURATED_TABLE)
 
