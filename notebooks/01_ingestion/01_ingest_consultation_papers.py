@@ -10,10 +10,10 @@ from pyspark.sql.functions import sum as spark_sum
 
 from consultation_paper_curator.config import load_config
 from consultation_paper_curator.curation import curate, curate_document
-from consultation_paper_curator.download import StoredFile, with_storage
 from consultation_paper_curator.http_client import create_session
-from consultation_paper_curator.schemas import CURATED_SCHEMA, RAW_SCHEMA
+from consultation_paper_curator.schemas import BRONZE_SCHEMA, SILVER_METADATA_SCHEMA, SILVER_SCHEMA, SOURCE_SCHEMA
 from consultation_paper_curator.sources.bma import fetch_bma_documents
+from consultation_paper_curator.tables import bronze_merge_sql, ensure_table, silver_merge_sql
 
 # COMMAND ----------
 # Create Spark session and load configuration
@@ -26,12 +26,26 @@ cfg = load_config("../../project_config.yml", env=env)
 
 CATALOG = cfg.catalog
 SCHEMA = cfg.schema
-TABLE_NAME = "bma_consultation_papers"
-table_path = f"{CATALOG}.{SCHEMA}.{TABLE_NAME}"
-CURATED_TABLE = f"{CATALOG}.{SCHEMA}.consultation_papers"
+BRONZE_TABLE = f"{CATALOG}.{SCHEMA}.bronze_consultation_papers"
+SILVER_TABLE = f"{CATALOG}.{SCHEMA}.silver_consultation_papers"
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`")
-logger.info(f"Schema {CATALOG}.{SCHEMA} ready")
+ensure_table(
+    spark,
+    BRONZE_TABLE,
+    BRONZE_SCHEMA,
+    layer="bronze",
+    comment="Bronze: consultation documents as each source lists them, upserted on every ingest run.",
+)
+ensure_table(
+    spark,
+    SILVER_TABLE,
+    SILVER_SCHEMA,
+    layer="silver",
+    comment="Silver: curated consultation papers (PDFs only, classified, deduplicated); "
+    "processed and volume_path are set by the download job.",
+)
+logger.info(f"Tables {BRONZE_TABLE} and {SILVER_TABLE} ready")
 
 # COMMAND ----------
 # Fetch BMA Consultation Paper Metadata (no files are downloaded here; see 02_download)
@@ -53,110 +67,104 @@ logger.info(f"Topics: {publications[0]['topics']}")
 logger.info(f"PDF URL: {publications[0]['pdf_url']}")
 
 # COMMAND ----------
-# Create Raw Delta Table in Unity Catalog
+# Upsert into the Bronze Table
+# New documents are inserted, changed ones updated, and documents the site no longer lists are kept
+# with is_listed = false. Unchanged rows are left alone, so first_seen_at survives every re-run.
 
-df = spark.createDataFrame(publications, schema=RAW_SCHEMA)
+spark.createDataFrame(publications, schema=SOURCE_SCHEMA).createOrReplaceTempView("scraped_papers")
+bronze_merge = spark.sql(bronze_merge_sql(BRONZE_TABLE, "scraped_papers", SOURCE_SCHEMA.fieldNames()))
 
-df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table_path)
-
-logger.info(f"Created Delta table: {table_path}")
-logger.info(f"Records: {df.count()}")
+logger.info(f"Merged into {BRONZE_TABLE}:")
+bronze_merge.show()
 
 # COMMAND ----------
-# Verify the Raw Data
+# Verify the Bronze Data
 
-papers_df = spark.table(table_path)
+bronze_df = spark.table(BRONZE_TABLE)
 
-logger.info(f"Table: {table_path}")
-logger.info(f"Total documents: {papers_df.count()}")
-papers_df.printSchema()
+logger.info(f"Total documents: {bronze_df.count()}")
+bronze_df.printSchema()
 
 logger.info("Sample records:")
-papers_df.select("document_id", "title", "uploaded_date", "topics").show(10, truncate=60)
+bronze_df.select("document_id", "title", "uploaded_date", "topics", "first_seen_at").show(10, truncate=60)
 
 # COMMAND ----------
-# Data Statistics
+# Bronze Statistics
 
 logger.info("Documents by category:")
-papers_df.select(explode("categories").alias("category")).groupBy("category").count().orderBy(
+bronze_df.select(explode("categories").alias("category")).groupBy("category").count().orderBy(
     "count", ascending=False
 ).show(truncate=False)
 
 logger.info("Documents by topic:")
-papers_df.select(explode("topics").alias("topic")).groupBy("topic").count().orderBy("count", ascending=False).show(
+bronze_df.select(explode("topics").alias("topic")).groupBy("topic").count().orderBy("count", ascending=False).show(
     50, truncate=False
 )
 
-logger.info("Current vs archived:")
-papers_df.groupBy("is_archived").count().show()
+logger.info("Listed vs delisted, current vs archived:")
+bronze_df.groupBy("is_listed", "is_archived").count().orderBy("is_listed", "is_archived").show()
 
 logger.info("Documents by year:")
-papers_df.groupBy(substring("uploaded_date", 1, 4).alias("year")).count().orderBy("year", ascending=False).show(30)
+bronze_df.groupBy(substring("uploaded_date", 1, 4).alias("year")).count().orderBy("year", ascending=False).show(30)
 
 logger.info("Most recent documents:")
-papers_df.select("title", "uploaded_date", "comment_deadline").orderBy(col("uploaded_date").desc_nulls_last()).show(
+bronze_df.select("title", "uploaded_date", "comment_deadline").orderBy(col("uploaded_date").desc_nulls_last()).show(
     10, truncate=60
 )
 
 # COMMAND ----------
-# Raw Data Quality Checks
+# Bronze Data Quality Checks
 
-quality_df = papers_df.agg(
+bronze_df.agg(
     spark_sum(when(col("uploaded_date").isNull(), 1).otherwise(0)).alias("missing_dates"),
     spark_sum(when(col("pdf_url").isNull(), 1).otherwise(0)).alias("missing_pdf_urls"),
     spark_sum(when(col("topics").getItem(0).isNull(), 1).otherwise(0)).alias("untagged_topics"),
-)
-
-quality_df.show(truncate=False)
+).show(truncate=False)
 
 # COMMAND ----------
-# Curate into the consultation_papers Delta Table
+# Curate Bronze into the Silver Table
 # Keeps PDFs only (spreadsheets such as BSCR models and templates can't feed the RAG pipeline),
 # classifies each document, takes the publication date from the CDN filename, and keeps one
-# document per title (current over archived, then newest). processed and volume_path start as None
-# and are set by the 02_download job; files already downloaded keep their values across re-runs.
+# document per title (current over archived, then newest). Curation runs over all of bronze because
+# deduplication needs every document, then upserts: new papers arrive with processed and volume_path
+# as None, and the MERGE never overwrites the values the 02_download job sets.
 
-raw_documents = [row.asDict(recursive=True) for row in papers_df.collect()]
-papers = curate(raw_documents)
+bronze_documents = [row.asDict(recursive=True) for row in bronze_df.collect()]
+papers = curate(bronze_documents)
 
-downloaded = {}
-if spark.catalog.tableExists(CURATED_TABLE):
-    downloaded = {
-        row.document_id: StoredFile(row.volume_path, row.processed)
-        for row in spark.table(CURATED_TABLE).where(col("volume_path").isNotNull()).collect()
-    }
+spark.createDataFrame(papers, schema=SILVER_METADATA_SCHEMA).createOrReplaceTempView("curated_papers")
+silver_merge = spark.sql(silver_merge_sql(SILVER_TABLE, "curated_papers", SILVER_METADATA_SCHEMA.fieldNames()))
 
-curated_df = spark.createDataFrame(with_storage(papers, downloaded), schema=CURATED_SCHEMA)
-curated_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(CURATED_TABLE)
-
-file_types = Counter(curate_document(raw)["file_type"] for raw in raw_documents)
+file_types = Counter(curate_document(document)["file_type"] for document in bronze_documents)
 superseded = sum(len(paper["superseded_ids"]) for paper in papers)
-logger.info(f"Raw documents: {len(raw_documents)} by file type: {dict(file_types)}")
+logger.info(f"Bronze documents: {len(bronze_documents)} by file type: {dict(file_types)}")
 logger.info(f"Curated papers: {len(papers)} ({superseded} duplicates superseded)")
-logger.info(f"Created Delta table: {CURATED_TABLE} ({len(downloaded)} downloads carried over)")
+logger.info(f"Merged into {SILVER_TABLE}:")
+silver_merge.show()
 
 # COMMAND ----------
-# Curated Summary
+# Silver Summary
 
-curated_df = spark.table(CURATED_TABLE)
+silver_df = spark.table(SILVER_TABLE)
 
 logger.info("Papers by kind:")
-curated_df.groupBy("doc_kind").count().orderBy("count", ascending=False).show()
+silver_df.groupBy("doc_kind").count().orderBy("count", ascending=False).show()
 
 # Open/closed is computed at query time rather than stored, so it never goes stale
 logger.info("Consultations open for comment:")
-curated_df.filter(col("comment_deadline") >= current_date()).select(
+silver_df.filter(col("comment_deadline") >= current_date()).select(
     "document_id", "title", "comment_deadline", "submission_emails"
 ).orderBy("comment_deadline").show(truncate=60)
 
 logger.info("Most recent papers:")
-curated_df.select("title", "doc_kind", "published_date", "comment_deadline").orderBy(
+silver_df.select("title", "doc_kind", "published_date", "comment_deadline").orderBy(
     col("published_date").desc_nulls_last()
 ).show(10, truncate=60)
 
-curated_df.agg(
+silver_df.agg(
     spark_sum(when(col("published_date").isNull(), 1).otherwise(0)).alias("missing_dates"),
     spark_sum(when(col("doc_kind") == "other", 1).otherwise(0)).alias("unclassified"),
+    spark_sum(when(~col("is_listed"), 1).otherwise(0)).alias("delisted"),
     spark_sum(when(col("volume_path").isNull(), 1).otherwise(0)).alias("not_downloaded"),
     spark_sum(when(size("topics") == 0, 1).otherwise(0)).alias("untagged_topics"),
 ).show(truncate=False)

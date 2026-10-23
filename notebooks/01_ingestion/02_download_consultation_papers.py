@@ -7,7 +7,8 @@ from pyspark.sql.functions import col, when
 from pyspark.sql.functions import sum as spark_sum
 
 from consultation_paper_curator.config import load_config
-from consultation_paper_curator.download import download_papers
+from consultation_paper_curator.curation import DOC_KINDS
+from consultation_paper_curator.download import download_papers, select_for_download
 from consultation_paper_curator.http_client import create_session
 
 # COMMAND ----------
@@ -22,19 +23,30 @@ cfg = load_config("../../project_config.yml", env=env)
 CATALOG = cfg.catalog
 SCHEMA = cfg.schema
 VOLUME = cfg.volume
-CURATED_TABLE = f"{CATALOG}.{SCHEMA}.consultation_papers"
+SILVER_TABLE = f"{CATALOG}.{SCHEMA}.silver_consultation_papers"
 volume_root = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
 
 # COMMAND ----------
 # Download Curated Papers to the Unity Catalog Volume
-# Only papers whose volume_path is still None are fetched; the 01_ingest job writes the curated table.
+# Only papers whose volume_path is still None are fetched; the 01_ingest job writes the silver table.
 
 MAX_DOWNLOADS = 5  # Capped while testing; None = download everything
+# Kinds to leave out of the download; any of DOC_KINDS. The breakdown below shows what each choice skips.
+EXCLUDED_DOC_KINDS = {"notice"}
+
+logger.info(f"Doc kinds: {list(DOC_KINDS)}; excluding: {sorted(EXCLUDED_DOC_KINDS)}")
 
 spark.sql(f"CREATE VOLUME IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.`{VOLUME}`")
 
-pending = [row.asDict() for row in spark.table(CURATED_TABLE).where(col("volume_path").isNull()).collect()]
-logger.info(f"Papers not yet downloaded: {len(pending)}")
+pending_df = spark.table(SILVER_TABLE).where(col("volume_path").isNull())
+
+logger.info("Papers not yet downloaded, by kind:")
+pending_df.groupBy("doc_kind").count().withColumn("will_download", ~col("doc_kind").isin(*EXCLUDED_DOC_KINDS)).orderBy(
+    col("will_download").desc(), col("count").desc()
+).show()
+
+pending = select_for_download([row.asDict() for row in pending_df.collect()], EXCLUDED_DOC_KINDS)
+logger.info(f"Papers selected for download: {len(pending)} (cap: {MAX_DOWNLOADS})")
 
 with create_session() as session:
     stored, stats = download_papers(pending, volume_root, session, max_downloads=MAX_DOWNLOADS)
@@ -42,7 +54,7 @@ with create_session() as session:
 logger.info(f"Papers downloaded: {stats.downloaded}, already present: {stats.skipped}, failed: {stats.failed}")
 
 # COMMAND ----------
-# Record processed and volume_path in the Curated Table
+# Record processed and volume_path in the Silver Table
 
 if stored:
     updates = spark.createDataFrame(
@@ -51,7 +63,7 @@ if stored:
     )
     updates.createOrReplaceTempView("downloaded_papers")
     spark.sql(f"""
-        MERGE INTO {CURATED_TABLE} AS papers
+        MERGE INTO {SILVER_TABLE} AS papers
         USING downloaded_papers AS downloaded
         ON papers.document_id = downloaded.document_id
         WHEN MATCHED THEN UPDATE SET
@@ -59,17 +71,18 @@ if stored:
             papers.volume_path = downloaded.volume_path
     """)
 
-logger.info(f"Updated {len(stored)} rows in {CURATED_TABLE}")
+logger.info(f"Updated {len(stored)} rows in {SILVER_TABLE}")
 
 # COMMAND ----------
 # Verify the Downloads
 
-papers_df = spark.table(CURATED_TABLE)
+papers_df = spark.table(SILVER_TABLE)
 
-papers_df.agg(
+logger.info("Download status by kind:")
+papers_df.groupBy("doc_kind").agg(
     spark_sum(when(col("volume_path").isNotNull(), 1).otherwise(0)).alias("downloaded"),
     spark_sum(when(col("volume_path").isNull(), 1).otherwise(0)).alias("not_downloaded"),
-).show()
+).withColumn("excluded", col("doc_kind").isin(*EXCLUDED_DOC_KINDS)).orderBy("excluded", "doc_kind").show()
 
 logger.info("Most recently downloaded:")
 papers_df.where(col("volume_path").isNotNull()).select("document_id", "title", "processed", "volume_path").orderBy(

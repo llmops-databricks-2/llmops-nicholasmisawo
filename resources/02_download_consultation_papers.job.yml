@@ -1,10 +1,10 @@
 # 02 Consultation Papers Download
 #
 # Downloads the PDFs of curated papers not yet in the Unity Catalog volume
-# and records processed and volume_path for each in the consultation_papers
-# table, for subsequent document processing and RAG-based retrieval.
-# Requires the curated table, so run the 01_ingest_consultation_papers job
-# at least once first.
+# and records processed and volume_path for each in the
+# silver_consultation_papers table, for subsequent document processing and
+# RAG-based retrieval. Requires the silver table, so run the
+# 01_ingest_consultation_papers job at least once first.
 #
 # Runs as a Databricks serverless notebook task using the packaged
 # project wheel. The target environment (dev/acc/prd) determines the

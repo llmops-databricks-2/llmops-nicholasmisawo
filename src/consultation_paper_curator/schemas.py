@@ -1,4 +1,4 @@
-"""Spark schemas of the project's Delta tables, shared by the notebooks that write and read them."""
+"""Spark schemas of the project's medallion Delta tables, shared by the notebooks that write and read them."""
 
 from pyspark.sql.types import (
     ArrayType,
@@ -11,8 +11,8 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-# Raw rows as each source returns them (see sources/)
-RAW_SCHEMA = StructType(
+# Rows as each source returns them (see sources/)
+SOURCE_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
         StructField("title", StringType(), False),
@@ -30,13 +30,21 @@ RAW_SCHEMA = StructType(
         StructField("related_documents", ArrayType(StringType()), True),
         StructField("institution", StringType(), True),
         StructField("source", StringType(), True),
-        StructField("ingestion_timestamp", StringType(), True),
+        StructField("ingestion_timestamp", StringType(), True),  # Ingest run that last inserted or changed the row
     ]
 )
 
-# Curated papers (see curation.curate), written by ingestion with processed/volume_path as None
-# and filled in by the download job once each file lands in the volume
-CURATED_SCHEMA = StructType(
+# Set by the bronze MERGE rather than by the source, so history survives re-runs
+BRONZE_TRACKING_FIELDS = [
+    StructField("first_seen_at", StringType(), True),  # Ingest run that first inserted the row
+    StructField("is_listed", BooleanType(), True),  # False once the source stops listing the document
+]
+
+# bronze_consultation_papers: every document any source has listed, as it returned them
+BRONZE_SCHEMA = StructType([*SOURCE_SCHEMA.fields, *BRONZE_TRACKING_FIELDS])
+
+# Curated metadata (see curation.curate), refreshed from bronze on every ingest
+SILVER_METADATA_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
         StructField("source", StringType(), True),
@@ -53,10 +61,19 @@ CURATED_SCHEMA = StructType(
         StructField("submission_emails", ArrayType(StringType()), True),
         StructField("topics", ArrayType(StringType()), True),
         StructField("is_archived", BooleanType(), True),
+        StructField("is_listed", BooleanType(), True),
         StructField("related_documents", ArrayType(StringType()), True),
         StructField("superseded_ids", ArrayType(StringType()), True),
         StructField("ingestion_timestamp", StringType(), True),
-        StructField("processed", LongType(), True),  # yyyyMMddHHmm; None until downloaded
-        StructField("volume_path", StringType(), True),  # None until downloaded
+        StructField("first_seen_at", StringType(), True),
     ]
 )
+
+# Owned by the download job; ingest inserts them as None and never overwrites them
+STORAGE_FIELDS = [
+    StructField("processed", LongType(), True),  # yyyyMMddHHmm, matching the course's arxiv_papers table
+    StructField("volume_path", StringType(), True),
+]
+
+# silver_consultation_papers: curated papers plus where each file landed in the volume
+SILVER_SCHEMA = StructType([*SILVER_METADATA_SCHEMA.fields, *STORAGE_FIELDS])

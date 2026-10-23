@@ -1,11 +1,12 @@
 # 01 Consultation Papers Ingestion
 #
 # Retrieves Bermuda Monetary Authority consultation and discussion papers
-# (current and archived), tagged with category and topic/sector filters, into
-# the raw bma_consultation_papers Delta table, then curates them (PDFs only,
-# classified, deduplicated) into the consultation_papers table with processed
-# and volume_path left as None. Downloads nothing; run the
-# 02_download_consultation_papers job to fetch the PDFs and fill those in.
+# (current and archived), tagged with category and topic/sector filters, and
+# upserts them into the bronze_consultation_papers Delta table. Then curates
+# bronze (PDFs only, classified, deduplicated) and upserts the result into
+# silver_consultation_papers, where new papers have processed and volume_path
+# as None. Both writes are incremental MERGEs, so re-runs are safe. Downloads
+# nothing; run the 02_download_consultation_papers job to fetch the PDFs.
 #
 # Runs as a Databricks serverless notebook task using the packaged
 # project wheel. The target environment (dev/acc/prd) determines the

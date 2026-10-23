@@ -20,6 +20,16 @@ DOC_KIND_PREFIXES = [
     ("notice", "notice"),
     ("guidance note", "guidance"),
 ]
+# Every value classify_doc_kind can return
+DOC_KINDS = (
+    "consultation_paper",
+    "discussion_paper",
+    "stakeholder_letter",
+    "notice",
+    "guidance",
+    "legislation",
+    "other",
+)
 LEGISLATION_PATTERN = re.compile(r"\b(act|acts|rules|bill|regulations|amendments?)\b")
 
 # CDN filenames start with one or more upload timestamps, e.g.
@@ -139,9 +149,11 @@ def curate_document(raw: dict) -> dict:
         "submission_emails": extract_emails(raw.get("summary")),
         "topics": list(raw.get("topics") or []),
         "is_archived": bool(raw.get("is_archived")),
+        "is_listed": raw.get("is_listed", True),
         "related_documents": list(raw.get("related_documents") or []),
         "superseded_ids": [],
         "ingestion_timestamp": raw.get("ingestion_timestamp"),
+        "first_seen_at": raw.get("first_seen_at"),
     }
 
 

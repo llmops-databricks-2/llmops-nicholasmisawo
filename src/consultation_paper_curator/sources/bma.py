@@ -165,7 +165,7 @@ def fetch_bma_documents(
 ) -> list[dict]:
     """Fetch BMA consultation documents tagged with category, topic and archive status.
 
-    Returns raw rows matching ``schemas.RAW_SCHEMA``, newest first, capped at ``max_results``.
+    Returns rows matching ``schemas.SOURCE_SCHEMA``, newest first, capped at ``max_results``.
     """
     documents: dict[str, dict] = {}
     archive_flags = [False, True] if include_archive else [False]

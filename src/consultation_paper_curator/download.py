@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 import requests
 
+from consultation_paper_curator.curation import DOC_KINDS
 from consultation_paper_curator.http_client import download_file
 
 
@@ -26,6 +27,18 @@ class DownloadStats:
     downloaded: int = 0
     skipped: int = 0
     failed: int = 0
+
+
+def select_for_download(papers: Iterable[dict], excluded_doc_kinds: Iterable[str] = ()) -> list[dict]:
+    """Return the papers to download, leaving out those whose ``doc_kind`` is excluded.
+
+    Raises ValueError for an unknown kind, so a typo can't silently exclude nothing.
+    """
+    excluded = set(excluded_doc_kinds)
+    unknown = excluded - set(DOC_KINDS)
+    if unknown:
+        raise ValueError(f"Unknown doc_kind(s) {sorted(unknown)}; choose from {list(DOC_KINDS)}")
+    return [paper for paper in papers if paper["doc_kind"] not in excluded]
 
 
 def paper_path(volume_root: str, paper: dict) -> str:
@@ -77,18 +90,3 @@ def download_papers(
         stored[paper["document_id"]] = _stored_file(path)
 
     return stored, DownloadStats(downloaded, skipped, failed)
-
-
-def with_storage(papers: Iterable[dict], stored: dict[str, StoredFile]) -> list[dict]:
-    """Return copies of papers with ``processed`` and ``volume_path`` set (None if not stored)."""
-    rows = []
-    for paper in papers:
-        stored_file = stored.get(paper["document_id"])
-        rows.append(
-            {
-                **paper,
-                "processed": stored_file.processed if stored_file else None,
-                "volume_path": stored_file.volume_path if stored_file else None,
-            }
-        )
-    return rows

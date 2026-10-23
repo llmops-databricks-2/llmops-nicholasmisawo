@@ -56,30 +56,45 @@ Two separate jobs, one per notebook, so each can be run on its own. Their names 
 
 | Job (UI name) | Notebook | Unity Catalog tables | Volume folder |
 |---|---|---|---|
-| `01_ingest_consultation_papers-<target>` | `01_ingest_consultation_papers.py` | `bma_consultation_papers` (raw), `consultation_papers` (curated) | — |
-| `02_download_consultation_papers-<target>` | `02_download_consultation_papers.py` | updates `consultation_papers` | `consultation_paper_curator_files/<source>/` |
+| `01_ingest_consultation_papers-<target>` | `01_ingest_consultation_papers.py` | `bronze_consultation_papers`, `silver_consultation_papers` | — |
+| `02_download_consultation_papers-<target>` | `02_download_consultation_papers.py` | updates `silver_consultation_papers` | `consultation_paper_curator_files/<source>/` |
 
-Run ingest at least once before download, since download reads the curated table:
+Run ingest at least once before download, since download reads the silver table:
 
 ```bash
 databricks bundle run 01_ingest_consultation_papers -t dev
 databricks bundle run 02_download_consultation_papers -t dev
 ```
 
-**01 Ingest** is the single ingestion workflow, following the course's `arxiv_papers` pattern. It fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and overwrites the raw table as the site returns it. It then curates them with the rules in `src/consultation_paper_curator/curation.py`:
+**01 Ingest** is the single ingestion workflow, following the course's `arxiv_papers` pattern. It fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and upserts them into bronze. It then curates all of bronze with the rules in `src/consultation_paper_curator/curation.py` and upserts the result into silver:
 
 - Keeps PDFs only. Spreadsheets (BSCR models, templates, response forms) are dropped.
 - Classifies each document as `consultation_paper`, `discussion_paper`, `stakeholder_letter`, `notice`, `guidance`, `legislation` or `other` from its title prefix, falling back to the filename.
 - Takes the publication date from the upload timestamp in the CDN filename, which is more reliable than the site's listed date. For re-uploaded files it uses the original timestamp.
 - Normalizes titles (dashes, quotes, repeated prefixes) and keeps one document per title, current over archived and then newest, recording the dropped ids in `superseded_ids`.
 
-It writes the curated `consultation_papers` table with `processed` and `volume_path` as `None` and shows a curated summary (papers by kind, open consultations, quality checks). It downloads nothing. Papers already downloaded keep their `processed` and `volume_path` when ingestion re-runs.
+New papers arrive in silver with `processed` and `volume_path` as `None`, and the notebook ends with a silver summary (papers by kind, open consultations, quality checks). It downloads nothing.
 
-**02 Download** fetches the curated papers whose `volume_path` is still `None` into the volume as `<source>/<document_id>.pdf`, then sets `processed` and `volume_path` on those rows with a `MERGE`. It caps new downloads at `MAX_DOWNLOADS`, currently 5 while testing.
+**02 Download** fetches the curated papers whose `volume_path` is still `None` into the volume as `<source>/<document_id>.pdf`, then sets `processed` and `volume_path` on those rows with a `MERGE`. It caps new downloads at `MAX_DOWNLOADS`, currently 5 while testing. Kinds listed in `EXCLUDED_DOC_KINDS` (currently `notice`) are skipped; the notebook prints pending papers by `doc_kind` with a `will_download` flag, so you can see what each exclusion leaves out before changing it. An unknown kind fails the run rather than silently excluding nothing.
+
+### Medallion tables and incremental runs
+
+| Table | Layer | Holds | Written by |
+|---|---|---|---|
+| `bronze_consultation_papers` | bronze | Every document any source has listed, as it returned them, plus `first_seen_at` and `is_listed` | 01 Ingest |
+| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, plus `processed` and `volume_path` | 01 Ingest (metadata), 02 Download (storage) |
+
+Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver`), so its layer shows in Catalog Explorer. Both are updated with `MERGE` on `document_id` rather than overwritten, so runs are incremental and safe to repeat:
+
+- **Bronze** inserts new documents and updates only rows whose content changed; a new run timestamp alone is not a change, so unchanged rows and their `first_seen_at` are left alone. Documents the site stops listing are kept with `is_listed = false` and flip back if they reappear.
+- **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Papers that no longer survive curation, for example superseded by a newer duplicate, are removed from silver; any file already downloaded for them stays in the volume.
+- **Download** fetches only rows with no `volume_path` and skips files already in the volume.
+
+The BMA site has no "changed since" filter, so every ingest still scrapes the full listing (about four minutes); only the writes are incremental.
 
 Whether a consultation is open is computed at query time (`comment_deadline >= current_date()`) rather than stored, so it never goes stale.
 
-### Raw table schema: `bma_consultation_papers`
+### Bronze table schema: `bronze_consultation_papers`
 
 | Column | Type | Description |
 |---|---|---|
@@ -97,9 +112,11 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | `view_url` / `download_url` | string | BMA viewer and download links |
 | `related_documents` | array\<string\> | CDN URLs from the "Related Document" menu |
 | `institution` / `source` | string | `BMA` / `bma` |
-| `ingestion_timestamp` | string | Run time (UTC ISO) |
+| `ingestion_timestamp` | string | Ingest run that last inserted or changed the row (UTC ISO) |
+| `first_seen_at` | string | Ingest run that first inserted the row (UTC ISO) |
+| `is_listed` | boolean | `false` once the site stops listing the document |
 
-### Curated table schema: `consultation_papers`
+### Silver table schema: `silver_consultation_papers`
 
 | Column | Type | Description |
 |---|---|---|
@@ -117,9 +134,11 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | `submission_emails` | array\<string\> | Email addresses in `submission_note` |
 | `topics` | array\<string\> | Topic/sector filters |
 | `is_archived` | boolean | Listed under the site's archive |
+| `is_listed` | boolean | `false` once the site stops listing the document |
 | `related_documents` | array\<string\> | CDN URLs from the "Related Document" menu |
 | `superseded_ids` | array\<string\> | Ids of duplicates this row replaced |
-| `ingestion_timestamp` | string | Ingest run time (UTC ISO) |
+| `ingestion_timestamp` | string | Ingest run that last changed the bronze row (UTC ISO) |
+| `first_seen_at` | string | Ingest run that first saw the document (UTC ISO) |
 | `processed` | long | Download time as `yyyyMMddHHmm`; `None` until 02 Download runs |
 | `volume_path` | string | File location in the volume; `None` until 02 Download runs |
 
@@ -201,10 +220,11 @@ llmops-nicholasmisawo/
 ├── src/
 │   └── consultation_paper_curator/
 │       ├── config.py
-│       ├── curation.py        # rules that turn raw rows into curated papers
+│       ├── curation.py        # rules that turn bronze rows into silver papers
 │       ├── download.py        # download curated papers into the volume
 │       ├── http_client.py     # retrying HTTP session and file download
-│       ├── schemas.py         # Spark schemas of the raw and curated tables
+│       ├── schemas.py         # Spark schemas of the bronze and silver tables
+│       ├── tables.py          # create/label tables and build their incremental MERGEs
 │       └── sources/
 │           └── bma.py         # BMA documents-centre scraper
 ├── notebooks/
@@ -221,7 +241,8 @@ llmops-nicholasmisawo/
 │   ├── test_config.py
 │   ├── test_curation.py
 │   ├── test_download.py
-│   └── test_schemas.py
+│   ├── test_schemas.py
+│   └── test_tables.py
 ├── .github/
 │   ├── workflows/
 │   │   └── ci.yml
@@ -236,7 +257,7 @@ llmops-nicholasmisawo/
 
 **Main components**
 
-- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt), source scrapers, curation rules, downloads, table schemas, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `RAW_SCHEMA`.
+- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt), source scrapers, curation rules, downloads, table schemas and MERGEs, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `SOURCE_SCHEMA`.
 - `notebooks/01_ingestion/`: data ingestion and curation pipelines, starting with BMA consultation papers.
 - `notebooks/02_processing/`: planned document extraction, cleaning, chunking, and preparation for embeddings.
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.

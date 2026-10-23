@@ -5,6 +5,8 @@ from datetime import date, datetime
 import pytest
 
 from consultation_paper_curator.curation import (
+    DOC_KIND_PREFIXES,
+    DOC_KINDS,
     classify_doc_kind,
     curate,
     extract_emails,
@@ -139,3 +141,15 @@ def test_curate_keeps_current_over_archived_duplicate() -> None:
         ]
     )
     assert [(d["document_id"], d["superseded_ids"]) for d in docs] == [("bma_8326", ["bma_8150"])]
+
+
+def test_doc_kinds_lists_every_classification() -> None:
+    """DOC_KINDS covers each kind the classifier can produce, so download filters can be validated."""
+    produced = {kind for _, kind in DOC_KIND_PREFIXES} | {
+        "consultation_paper",
+        "discussion_paper",
+        "legislation",
+        "other",
+    }
+
+    assert produced == set(DOC_KINDS)
