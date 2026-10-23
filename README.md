@@ -54,7 +54,7 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 
 | Job | Notebook | Unity Catalog table | Volume folder |
 |---|---|---|---|
-| `bma_consultation_papers` | `01_ingest_bma_consultation_papers.py` | `bma_consultation_papers` | `consultation_curator_files/bma/` |
+| `bma_consultation_papers` | `01_ingest_bma_consultation_papers.py` | `bma_consultation_papers` | `consultation_paper_curator_files/bma/` |
 
 The job:
 
@@ -95,7 +95,7 @@ The job:
 | Development schema | `llmops_dev.nicholasmisawo` |
 | Acceptance schema | `llmops_acc.nicholasmisawo` |
 | Production schema | `llmops_prd.nicholasmisawo` |
-| Project document volume | `consultation_curator_files` (created by the ingestion job) |
+| Project document volume | `consultation_paper_curator_files` (created by the ingestion job) |
 | SQL warehouse ID | `0e56acba898dad4a` |
 | Usage policy ID | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | Dev MLflow experiment | `/llmops/nicholasmisawo-dev` |
@@ -164,7 +164,7 @@ Additional branches or compute resources may increase costs.
 ```text
 llmops-nicholasmisawo/
 ├── src/
-│   └── consultation_curator/
+│   └── consultation_paper_curator/
 │       └── config.py
 ├── notebooks/
 │   └── 01_ingestion/
@@ -187,14 +187,14 @@ llmops-nicholasmisawo/
 
 **Main components**
 
-- `src/consultation_curator/`: reusable Python package for configuration (including the assistant system prompt) and application logic.
+- `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt) and application logic.
 - `notebooks/01_ingestion/`: data ingestion pipelines, starting with BMA consultation papers.
 - `notebooks/02_processing/`: planned document extraction, cleaning, chunking, and preparation for embeddings.
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
 - `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks.
 - `databricks.yml`: deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
-- `project_config.yml`: environment-specific catalog, schema, volume (`consultation_curator_files`), model services, and warehouse settings.
+- `project_config.yml`: environment-specific catalog, schema, volume (`consultation_paper_curator_files`), model services, and warehouse settings.
 - `pyproject.toml` and `uv.lock`: Python dependencies and reproducible environment management.
 - `tests/`: automated tests, including configuration validation.
 - `.github/workflows/ci.yml`: continuous integration for code-quality checks and tests.

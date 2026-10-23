@@ -305,7 +305,7 @@ wheels = [
 ]
 
 [[package]]
-name = "consultation-curator"
+name = "consultation-paper-curator"
 source = { editable = "." }
 dependencies = [
     { name = "arxiv" },
