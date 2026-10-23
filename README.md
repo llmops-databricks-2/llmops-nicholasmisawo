@@ -52,45 +52,45 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 
 ## 3. Data Pipelines
 
-Two separate jobs, one per notebook, so each can be run on its own. Their names are numbered so the Jobs UI lists them in run order. Both are serverless notebook jobs with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
+Two jobs, one per medallion layer, so each can be run on its own. They're named after the table they write, so the Jobs UI lists bronze before silver. Both are serverless notebook jobs with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
 
-| Job (UI name) | Notebook | Unity Catalog tables | Volume folder |
+| Job (UI name) | Notebook | Unity Catalog table | Volume folder |
 |---|---|---|---|
-| `01_ingest_consultation_papers-<target>` | `01_ingest_consultation_papers.py` | `bronze_consultation_papers`, `silver_consultation_papers` | — |
-| `02_download_consultation_papers-<target>` | `02_download_consultation_papers.py` | updates `silver_consultation_papers` | `consultation_paper_curator_files/<source>/` |
+| `bronze_consultation_papers-<target>` | `bronze_consultation_papers.py` | `bronze_consultation_papers` | — |
+| `silver_consultation_papers-<target>` | `silver_consultation_papers.py` | `silver_consultation_papers` | `consultation_paper_curator_files/<source>/` (only when `DOWNLOAD_FILES = True`) |
 
-Run ingest at least once before download, since download reads the silver table:
+Run bronze at least once before silver, since silver reads the bronze table:
 
 ```bash
-databricks bundle run 01_ingest_consultation_papers -t dev
-databricks bundle run 02_download_consultation_papers -t dev
+databricks bundle run bronze_consultation_papers -t dev
+databricks bundle run silver_consultation_papers -t dev
 ```
 
-**01 Ingest** is the single ingestion workflow, following the course's `arxiv_papers` pattern. It fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and upserts them into bronze. It then curates all of bronze with the rules in `src/consultation_paper_curator/curation.py` and upserts the result into silver:
+**Bronze** fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and upserts them into bronze. It downloads nothing.
+
+**Silver** curates all of bronze with the rules in `src/consultation_paper_curator/curation.py` and upserts the result into silver:
 
 - Keeps PDFs only. Spreadsheets (BSCR models, templates, response forms) are dropped.
 - Classifies each document as `consultation_paper`, `discussion_paper`, `stakeholder_letter`, `notice`, `guidance`, `legislation` or `other` from its title prefix, falling back to the filename.
 - Takes the publication date from the upload timestamp in the CDN filename, which is more reliable than the site's listed date. For re-uploaded files it uses the original timestamp.
 - Normalizes titles (dashes, quotes, repeated prefixes) and keeps one document per title, current over archived and then newest, recording the dropped ids in `superseded_ids`.
 
-New papers arrive in silver with `processed` and `volume_path` as `None`, and the notebook ends with a silver summary (papers by kind, open consultations, quality checks). It downloads nothing.
-
-**02 Download** fetches the curated papers whose `volume_path` is still `None` into the volume as `<source>/<document_id>.pdf`, then sets `processed` and `volume_path` on those rows with a `MERGE`. It caps new downloads at `MAX_DOWNLOADS`, currently 5 while testing. Kinds listed in `EXCLUDED_DOC_KINDS` (currently `notice`) are skipped; the notebook prints pending papers by `doc_kind` with a `will_download` flag, so you can see what each exclusion leaves out before changing it. An unknown kind fails the run rather than silently excluding nothing.
+New papers arrive with `processed` and `volume_path` as `None`, following the course's `arxiv_papers` pattern, and they stay `None` until you turn downloads on. The notebook's last section is gated by `DOWNLOAD_FILES` (default `False`). When it's `False` the run ends after the silver summary and still prints pending papers by `doc_kind`. Set it to `True` to download papers that have no `volume_path` yet into the volume as `<source>/<document_id>.pdf`, and set `processed` (download time as `yyyyMMddHHmm`) and `volume_path` on those rows. Downloads are capped at `MAX_DOWNLOADS` (currently 5 while testing). Kinds listed in `EXCLUDED_DOC_KINDS` (currently `notice`) are skipped; the `will_download` breakdown shows what each exclusion leaves out, and an unknown kind fails the run rather than silently excluding nothing.
 
 ### Medallion tables and incremental runs
 
 | Table | Layer | Holds | Written by |
 |---|---|---|---|
-| `bronze_consultation_papers` | bronze | Every document any source has listed, as it returned them, plus `first_seen_at` and `is_listed` | 01 Ingest |
-| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, plus `processed` and `volume_path` | 01 Ingest (metadata), 02 Download (storage) |
+| `bronze_consultation_papers` | bronze | Every document any source has listed, as it returned them, plus `first_seen_at` and `is_listed` | Bronze job |
+| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, plus `processed` and `volume_path` | Silver job |
 
 Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver`), so its layer shows in Catalog Explorer. Both are updated with `MERGE` on `document_id` rather than overwritten, so runs are incremental and safe to repeat:
 
 - **Bronze** inserts new documents and updates only rows whose content changed; a new run timestamp alone is not a change, so unchanged rows and their `first_seen_at` are left alone. Documents the site stops listing are kept with `is_listed = false` and flip back if they reappear.
 - **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Papers that no longer survive curation, for example superseded by a newer duplicate, are removed from silver; any file already downloaded for them stays in the volume.
-- **Download** fetches only rows with no `volume_path` and skips files already in the volume.
+- **Downloads**, when enabled, fetch only rows with no `volume_path` and skip files already in the volume.
 
-The BMA site has no "changed since" filter, so every ingest still scrapes the full listing (about four minutes); only the writes are incremental.
+The BMA site has no "changed since" filter, so every bronze run still scrapes the full listing (about four minutes); only the writes are incremental.
 
 Whether a consultation is open is computed at query time (`comment_deadline >= current_date()`) rather than stored, so it never goes stale.
 
@@ -139,8 +139,8 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | `superseded_ids` | array\<string\> | Ids of duplicates this row replaced |
 | `ingestion_timestamp` | string | Ingest run that last changed the bronze row (UTC ISO) |
 | `first_seen_at` | string | Ingest run that first saw the document (UTC ISO) |
-| `processed` | long | Download time as `yyyyMMddHHmm`; `None` until 02 Download runs |
-| `volume_path` | string | File location in the volume; `None` until 02 Download runs |
+| `processed` | long | Download time as `yyyyMMddHHmm`; `None` until downloaded (`DOWNLOAD_FILES = True`) |
+| `volume_path` | string | File location in the volume; `None` until downloaded (`DOWNLOAD_FILES = True`) |
 
 ## 4. Provisioned Databricks Resources
 
@@ -149,7 +149,7 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | Development schema | `llmops_dev.nicholasmisawo` |
 | Acceptance schema | `llmops_acc.nicholasmisawo` |
 | Production schema | `llmops_prd.nicholasmisawo` |
-| Project document volume | `consultation_paper_curator_files` (created by the 02 Download job) |
+| Project document volume | `consultation_paper_curator_files` (created by the silver job when `DOWNLOAD_FILES = True`) |
 | SQL warehouse ID | `0e56acba898dad4a` |
 | Usage policy ID | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | Dev MLflow experiment | `/llmops/nicholasmisawo-dev` |
@@ -229,11 +229,11 @@ llmops-nicholasmisawo/
 │           └── bma.py         # BMA documents-centre scraper
 ├── notebooks/
 │   └── 01_ingestion/
-│       ├── 01_ingest_consultation_papers.py
-│       └── 02_download_consultation_papers.py
+│       ├── bronze_consultation_papers.py
+│       └── silver_consultation_papers.py
 ├── resources/
-│   ├── 01_ingest_consultation_papers.job.yml
-│   └── 02_download_consultation_papers.job.yml
+│   ├── bronze_consultation_papers.job.yml
+│   └── silver_consultation_papers.job.yml
 ├── tests/
 │   ├── fixtures/
 │   ├── conftest.py
@@ -297,11 +297,11 @@ Pre-commit hooks format code and run the configured Ruff checks. If the hooks mo
 ```bash
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
-databricks bundle run 01_ingest_consultation_papers -t dev
-databricks bundle run 02_download_consultation_papers -t dev
+databricks bundle run bronze_consultation_papers -t dev
+databricks bundle run silver_consultation_papers -t dev
 ```
 
-A full metadata fetch takes about four minutes. To download every curated paper, set `MAX_DOWNLOADS = None` in `02_download_consultation_papers.py`. Files already in the volume are skipped on later runs.
+A full metadata fetch takes about four minutes. To download curated papers, set `DOWNLOAD_FILES = True` in `silver_consultation_papers.py`, and `MAX_DOWNLOADS = None` to download all of them. Files already in the volume are skipped on later runs.
 
 The deployment commands require Databricks authentication and the relevant target permissions.
 
