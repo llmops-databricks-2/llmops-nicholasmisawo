@@ -1,8 +1,9 @@
-# BIS Central Bank Speeches Ingestion
+# BMA Consultation Papers Ingestion
 #
-# Ingests ECB and Federal Reserve speeches from the BIS dataset into
-# the target environment's Unity Catalog Delta table.
-# Supports monetary policy research and RAG-based speech retrieval.
+# Retrieves Bermuda Monetary Authority consultation and discussion papers
+# (current and archived), tagged with category and topic/sector filters,
+# and downloads their PDFs to a Unity Catalog volume. Stores metadata in a
+# Delta table for subsequent document processing and RAG-based retrieval.
 #
 # Runs as a Databricks serverless notebook task using the packaged
 # project wheel. The target environment (dev/acc/prd) determines the
@@ -11,8 +12,8 @@
 
 resources:
   jobs:
-    bis_central_bank_speeches:
-      name: bis_central_bank_speeches-${bundle.target}
+    bma_consultation_papers:
+      name: bma_consultation_papers-${bundle.target}
       budget_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
       environments:
         - environment_key: default
@@ -22,9 +23,9 @@ resources:
               - ../dist/*.whl
 
       tasks:
-        - task_key: bis_central_bank_speeches
+        - task_key: bma_consultation_papers
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/01_ingestion/01_ingest_bis_central_bank_speeches.py
+            notebook_path: ../notebooks/01_ingestion/01_ingest_bma_consultation_papers.py
             base_parameters:
               env: ${bundle.target}
