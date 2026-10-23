@@ -1,54 +1,48 @@
-# FX Market Intelligence Assistant
+# Consultation Paper Curator
 
-**Databricks LLMOps | Central Bank Intelligence & FX Market Analytics**
+**Databricks LLMOps | Regulatory Consultation Intelligence**
 
-An AI-powered Market Intelligence Assistant that combines central bank communications with historical foreign exchange data to support monetary policy research and FX market analysis.
+An AI-powered assistant that curates regulatory consultation and discussion papers. It helps compliance and policy teams find what is being proposed, who it affects, and when comments are due.
 
-Built as part of the **LLMOps with Databricks** course, the project demonstrates end-to-end ingestion, governance, retrieval-augmented generation (RAG), structured analytics, evaluation, and monitoring.
+Built as part of the **LLMOps with Databricks** course, the project demonstrates end-to-end ingestion, governance, retrieval-augmented generation (RAG), evaluation, and monitoring.
 
 ## 1. Project Overview
 
 ### User and Problem
 
-The application supports monetary policy analysts, FX risk analysts, financial market researchers, and economists.
+The application supports compliance officers, regulatory policy teams, risk managers, and legal counsel at regulated financial institutions.
 
-It enables users to analyse central bank communications, examine exchange-rate developments, compare monetary policy narratives, and explore relationships between policy announcements and financial market movements.
+Regulators publish a steady stream of consultation papers, discussion papers, thematic reviews, and stakeholder letters. Each one is a PDF on a filterable website, and proposals often span several related documents over months. Keeping track of open consultations, their deadlines, and how a proposal evolved is manual and easy to miss.
 
 ### Data Sources
 
 | Source | Dataset | Purpose |
 |---|---|---|
-| Bank for International Settlements (BIS) | ECB and Federal Reserve speeches | Monetary policy communication analysis |
-| European Central Bank (ECB) | Daily EUR/USD exchange rates | FX trends, returns, and event-window analysis |
-| ECB Economic Bulletin | Economic and monetary policy publications | Macroeconomic context and market intelligence |
+| Bermuda Monetary Authority (BMA) [Documents Centre](https://www.bma.bm/documents-centre/documents-policy-and-guidance) | Discussion/Consultation Papers and Thematic Reviews (current and archived) | Proposed regulatory changes, comment deadlines, sector impact |
 
-**Initial coverage:** 2024–2026, subject to source availability.
+**Initial coverage:** every consultation document the BMA site lists, about 600 documents as of October 2026. The source is designed so that other regulators can be added later.
 
 ### Example Questions
 
-- How have ECB and Federal Reserve monetary policy narratives evolved?
-- What factors have influenced EUR/USD exchange-rate movements?
-- How did EUR/USD move around major central bank communications?
-- What differences exist between ECB and Fed policy outlooks?
-- What economic and financial market developments were highlighted in ECB Economic Bulletins?
+- Which BMA consultations are currently open, and when do comments close?
+- What does the BMA propose in its resolution regime for commercial insurers?
+- Which consultations affect Digital Asset Business in the last two years?
+- How did the parametric special purpose insurer proposal evolve across its consultation paper and stakeholder letters?
+- What thematic reviews has the BMA published, and what did they find?
 
-The assistant combines RAG-based document retrieval with SQL-based financial analysis to generate evidence-grounded responses with source citations.
+The assistant combines RAG-based document retrieval with SQL over document metadata to generate evidence-grounded responses with source citations.
 
 ## 2. Architecture
 
-The solution uses Databricks to integrate structured and unstructured financial information.
-
 **Data ingestion**
-- BIS speeches and ECB Economic Bulletins for unstructured text.
-- ECB Data Portal API for structured EUR/USD observations.
-- Delta tables for dataset storage and metadata management.
-- Unity Catalog Volumes for document storage during subsequent processing.
+- The BMA Documents Centre's filter endpoint is queried once per category, topic, and archive flag. This builds structured metadata: type, categories, topics, upload date, comment deadline, and related documents.
+- Delta tables store the document metadata.
+- Unity Catalog Volumes store the downloaded source PDFs.
 
 **Retrieval and analytics**
 - Document extraction, cleaning, chunking, and embeddings.
-- Semantic retrieval of monetary policy communications.
-- SQL analysis of exchange rates and historical returns.
-- Speech-event analysis combining retrieved text with numerical observations.
+- Semantic retrieval over consultation text.
+- SQL filtering by topic, sector, date, deadline, and archive status.
 
 **LLMOps**
 - Databricks AI Gateway for chat and embedding models.
@@ -56,38 +50,52 @@ The solution uses Databricks to integrate structured and unstructured financial 
 - Databricks Asset Bundles for environment-specific deployment.
 - GitHub Actions for CI/CD.
 
-The assistant examines historical associations and does not assume that central bank communications caused observed exchange-rate movements.
-
 ## 3. Data Pipelines
 
-Three ingestion jobs are configured through Databricks Asset Bundles.
+| Job | Notebook | Unity Catalog table | Volume folder |
+|---|---|---|---|
+| `bma_consultation_papers` | `01_ingest_bma_consultation_papers.py` | `bma_consultation_papers` | `consultation_curator_files/bma/` |
 
-| Job | Notebook | Unity Catalog table |
-|---|---|---|
-| `bis_central_bank_speeches` | `01_ingest_bis_central_bank_speeches.py` | `central_bank_speeches` |
-| `ecb_fx_rates` | `02_ingest_ecb_fx_rates.py` | `eurusd_exchange_rates` |
-| `ecb_economic_bulletins` | `03_ingest_ecb_economic_bulletins.py` | `ecb_economic_bulletins` |
+The job:
 
-Each job:
-
-- Runs as a serverless Databricks notebook task.
-- Installs the packaged project wheel.
+- Runs as a serverless Databricks notebook task with the packaged project wheel installed.
 - Loads environment-specific settings from `project_config.yml`.
-- Writes ingestion results into the corresponding Unity Catalog schema.
-- Uses an environment-specific job name to avoid deployment conflicts.
+- Fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories.
+- Tags each document with the site's category and topic/sector filters.
+- Downloads each source file to the volume as `<document_id>.<ext>`. It skips files already present and caps the run at `MAX_DOWNLOADS`, which is currently 20 while testing.
+- Overwrites the Delta table and reports data-quality checks.
 
-Document-processing fields such as `processed` and `volume_path` are reserved for subsequent pipeline stages.
+### Table schema: `bma_consultation_papers`
+
+| Column | Type | Description |
+|---|---|---|
+| `document_id` | string | `bma_<id>`, the BMA document id |
+| `title` | string | Document title |
+| `summary` | string | Card text, usually comment instructions |
+| `comment_deadline` | string | ISO date parsed from `summary`, if any |
+| `published` | long | Upload date as `yyyyMMdd` |
+| `uploaded_date` | string | Upload date (ISO) |
+| `document_type` | string | `Regulatory Legislative Documents` |
+| `categories` | array\<string\> | e.g. `Discussion/Consultation Papers` |
+| `topics` | array\<string\> | Topic/sector filters, e.g. `Insurance`, `Digital Asset Business` |
+| `is_archived` | boolean | Listed under the site's archive |
+| `is_stakeholder_letter` | boolean | Title starts with "Stakeholder Letter" |
+| `pdf_url` | string | Direct CDN file URL (a few are `.xlsx`) |
+| `view_url` / `download_url` | string | BMA viewer and download links |
+| `related_documents` | array\<string\> | CDN URLs from the "Related Document" menu |
+| `institution` / `source` | string | `BMA` / `bma` |
+| `ingestion_timestamp` | string | Run time (UTC ISO) |
+| `processed` | long | Download time as `yyyyMMddHHmm` |
+| `volume_path` | string | File location in the volume |
 
 ## 4. Provisioned Databricks Resources
-
-The following infrastructure was provisioned as part of the course.
 
 | Resource | Value |
 |---|---|
 | Development schema | `llmops_dev.nicholasmisawo` |
 | Acceptance schema | `llmops_acc.nicholasmisawo` |
 | Production schema | `llmops_prd.nicholasmisawo` |
-| Project document volume | `fx_market_intel_files` |
+| Project document volume | `consultation_curator_files` (created by the ingestion job) |
 | SQL warehouse ID | `0e56acba898dad4a` |
 | Usage policy ID | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | Dev MLflow experiment | `/llmops/nicholasmisawo-dev` |
@@ -95,8 +103,6 @@ The following infrastructure was provisioned as part of the course.
 | Prd MLflow experiment | `/llmops/nicholasmisawo-prd` |
 | Chat model service | `course_ops.gateway.chat` |
 | Embedding model service | `course_ops.gateway.embed` |
-
-The existing document volume name is retained for compatibility with earlier configurations. It may be renamed to `market_intelligence_documents` in a future migration.
 
 ### AI Gateway
 
@@ -117,7 +123,7 @@ response = client.chat.completions.create(
     messages=[
         {
             "role": "user",
-            "content": "Explain the relationship between ECB policy and EUR/USD.",
+            "content": "Summarise the BMA's proposed resolution regime for commercial insurers.",
         }
     ],
     reasoning_effort="low",
@@ -126,11 +132,11 @@ response = client.chat.completions.create(
 
 embeddings = client.embeddings.create(
     model="course_ops.gateway.embed",
-    input="ECB monetary policy and exchange-rate developments",
+    input="BMA consultation on parametric special purpose insurers",
 )
 ```
 
-The `databricks-openai` package is not currently included in the repository dependencies. The APIs can also be accessed through the OpenAI client configured with Databricks authentication and the `/ai-gateway/mlflow/v1` base URL.
+The repository dependencies don't currently include the `databricks-openai` package. The APIs can also be reached through the OpenAI client, configured with Databricks authentication and the `/ai-gateway/mlflow/v1` base URL.
 
 The `embedding_endpoint` configuration identifies an AI Gateway embedding service, not a managed Vector Search embedding endpoint.
 
@@ -142,7 +148,7 @@ Unity Catalog schemas remain environment-specific.
 
 The course does not automatically create an application database or install `pgvector`. These resources must be configured during the relevant lecture.
 
-Lakebase supports PostgreSQL-based vector storage, while Databricks managed Vector Search would require separate endpoint and index provisioning.
+Lakebase supports PostgreSQL-based vector storage. Databricks managed Vector Search would instead need its own endpoint and index.
 
 Provisioned Lakebase characteristics include:
 
@@ -158,20 +164,13 @@ Additional branches or compute resources may increase costs.
 ```text
 llmops-nicholasmisawo/
 ├── src/
-│   └── fx_market_intel/
-│       ├── __init__.py
+│   └── consultation_curator/
 │       └── config.py
 ├── notebooks/
-│   ├── 01_ingestion/
-│   │   ├── 01_ingest_bis_central_bank_speeches.py
-│   │   ├── 02_ingest_ecb_fx_rates.py
-│   │   └── 03_ingest_ecb_economic_bulletins.py
-│   └── 02_experiments/
-│       └── 01_experiment_unity_gateway.py
+│   └── 01_ingestion/
+│       └── 01_ingest_bma_consultation_papers.py
 ├── resources/
-│   ├── bis_central_bank_speeches.yml
-│   ├── ecb_fx_rates.yml
-│   └── ecb_economic_bulletins.yml
+│   └── bma_consultation_papers.job.yml
 ├── tests/
 │   └── test_config.py
 ├── .github/
@@ -188,19 +187,18 @@ llmops-nicholasmisawo/
 
 **Main components**
 
-- `src/fx_market_intel/` — Reusable Python package for configuration, data ingestion, analytics, and AI application logic.
-- `notebooks/01_ingestion/` — Data ingestion pipelines for BIS speeches, ECB EUR/USD rates, and ECB Economic Bulletins.
-- `notebooks/02_experiments/` — Model experimentation using Databricks Unity Gateway, including chat completions, embeddings, token usage, and latency.
-- `notebooks/03_processing/` — Planned document extraction, cleaning, chunking, and preparation for embeddings.
-- `notebooks/04_rag/` — Planned retrieval-augmented generation and market intelligence workflows.
-- `notebooks/05_evaluation/` — Planned model evaluation, tracing, and monitoring using MLflow.
-- `resources/` — Databricks Asset Bundle job definitions, separate from notebook implementation.
-- `databricks.yml` — Deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
-- `project_config.yml` — Environment-specific catalog, schema, volume (`fx_market_intel_files`), model services, and warehouse settings.
-- `pyproject.toml` and `uv.lock` — Python dependencies and reproducible environment management.
-- `tests/` — Automated tests, including configuration validation.
-- `.github/workflows/ci.yml` — Continuous integration for code-quality checks and tests.
-- `.github/CODEOWNERS` — Pull-request ownership and review requirements.
+- `src/consultation_curator/`: reusable Python package for configuration (including the assistant system prompt) and application logic.
+- `notebooks/01_ingestion/`: data ingestion pipelines, starting with BMA consultation papers.
+- `notebooks/02_processing/`: planned document extraction, cleaning, chunking, and preparation for embeddings.
+- `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
+- `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
+- `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks.
+- `databricks.yml`: deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
+- `project_config.yml`: environment-specific catalog, schema, volume (`consultation_curator_files`), model services, and warehouse settings.
+- `pyproject.toml` and `uv.lock`: Python dependencies and reproducible environment management.
+- `tests/`: automated tests, including configuration validation.
+- `.github/workflows/ci.yml`: continuous integration for code-quality checks and tests.
+- `.github/CODEOWNERS`: pull-request ownership and review requirements.
 
 ## 7. Getting Started
 
@@ -222,27 +220,17 @@ uv sync --extra dev --active
 uvx pre-commit install
 ```
 
-Pre-commit hooks format code and run configured Ruff checks. If hooks modify files during a commit, stage the changes and commit again.
+Pre-commit hooks format code and run the configured Ruff checks. If the hooks modify files during a commit, stage the changes and commit again.
 
-### Validate the Databricks bundle
+### Validate, deploy, and run
 
 ```bash
 databricks bundle validate -t dev
-```
-
-### Deploy ingestion jobs
-
-```bash
 databricks bundle deploy -t dev
+databricks bundle run bma_consultation_papers -t dev
 ```
 
-### Run an ingestion job
-
-```bash
-databricks bundle run bis_central_bank_speeches -t dev
-databricks bundle run ecb_fx_rates -t dev
-databricks bundle run ecb_economic_bulletins -t dev
-```
+A full metadata fetch takes about four minutes. To download every source file, set `MAX_DOWNLOADS = None` in the notebook. Files already in the volume are skipped on later runs.
 
 The deployment commands require Databricks authentication and the relevant target permissions.
 
@@ -258,10 +246,9 @@ The Databricks Asset Bundle supports three targets:
 
 Each environment has its own MLflow experiment and Unity Catalog tracing destination.
 
-The user can manage the development experiment and write development traces. Acceptance and production resources are read-only to the student, while the respective deployment service principals manage their environments.
+You can manage the development experiment and write development traces. Acceptance and production resources are read-only to the student, while the respective deployment service principals manage their environments.
 
 The GitHub Actions CI workflow runs on pull requests and pushes to `main`, installing dependencies and executing pre-commit checks and tests.
-
 
 ## 9. Course Community
 
@@ -271,4 +258,4 @@ Course channels become available to participants included in the student list.
 
 ---
 
-**Project objective:** Build a governed, evidence-based Market Intelligence Assistant demonstrating the complete Databricks LLMOps lifecycle—from ingestion and retrieval to financial analytics, generation, evaluation, and monitoring.
+**Project objective:** Build a governed, evidence-based Consultation Paper Curator demonstrating the complete Databricks LLMOps lifecycle, from ingestion and retrieval to generation, evaluation, and monitoring.

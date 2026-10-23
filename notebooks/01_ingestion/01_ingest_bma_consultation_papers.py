@@ -18,7 +18,7 @@ from pyspark.sql.types import ArrayType, BooleanType, LongType, StringType, Stru
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from fx_market_intel.config import load_config
+from consultation_curator.config import load_config
 
 # COMMAND ----------
 # Create Spark session and load configuration
