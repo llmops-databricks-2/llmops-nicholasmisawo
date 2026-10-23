@@ -26,6 +26,6 @@ resources:
         - task_key: bma_consultation_papers
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/01_ingestion/03_ingest_bma_consultation_papers.py
+            notebook_path: ../notebooks/01_ingestion/04_ingest_bma_consultation_papers.py
             base_parameters:
               env: ${bundle.target}
