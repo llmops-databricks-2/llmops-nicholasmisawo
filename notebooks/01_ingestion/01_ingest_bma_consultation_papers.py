@@ -259,7 +259,7 @@ logger.info(f"PDF URL: {publications[0]['pdf_url']}")
 # COMMAND ----------
 # Download Documents to the Unity Catalog Volume
 
-MAX_DOWNLOADS = 20  # Capped while testing; None = download everything
+MAX_DOWNLOADS = 5  # Capped while testing; None = download everything
 
 
 def download_document(session, url, path):

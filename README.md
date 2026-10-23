@@ -62,7 +62,7 @@ The job:
 - Loads environment-specific settings from `project_config.yml`.
 - Fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories.
 - Tags each document with the site's category and topic/sector filters.
-- Downloads each source file to the volume as `<document_id>.<ext>`. It skips files already present and caps the run at `MAX_DOWNLOADS`, which is currently 20 while testing.
+- Downloads each source file to the volume as `<document_id>.<ext>`. It skips files already present and caps the run at `MAX_DOWNLOADS`, which is currently 5 while testing.
 - Overwrites the Delta table and reports data-quality checks.
 
 ### Table schema: `bma_consultation_papers`
