@@ -1,0 +1,31 @@
+# BMA Consultation Papers Ingestion
+#
+# Retrieves Bermuda Monetary Authority consultation and discussion papers
+# (current and archived), tagged with category and topic/sector filters,
+# and downloads their PDFs to a Unity Catalog volume. Stores metadata in a
+# Delta table for subsequent document processing and RAG-based retrieval.
+#
+# Runs as a Databricks serverless notebook task using the packaged
+# project wheel. The target environment (dev/acc/prd) determines the
+# catalog, schema, and configuration loaded from project_config.yml.
+# Job names are environment-specific to prevent deployment conflicts.
+
+resources:
+  jobs:
+    bma_consultation_papers:
+      name: bma_consultation_papers-${bundle.target}
+      budget_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: bma_consultation_papers
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/01_ingestion/03_ingest_bma_consultation_papers.py
+            base_parameters:
+              env: ${bundle.target}
