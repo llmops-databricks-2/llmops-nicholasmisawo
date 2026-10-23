@@ -1,4 +1,4 @@
-"""Download curated papers into a Unity Catalog volume."""
+"""Download curated papers into a Unity Catalog volume and record where they landed."""
 
 import os
 import time
@@ -13,10 +13,10 @@ from consultation_paper_curator.http_client import download_file
 
 @dataclass(frozen=True)
 class StoredFile:
-    """Where a paper's file lives in the volume and when it landed there."""
+    """Where a paper's file lives in the volume and when it landed there (``processed``)."""
 
     volume_path: str
-    downloaded_at: datetime
+    processed: int | None  # yyyyMMddHHmm, matching the course's arxiv_papers table
 
 
 @dataclass(frozen=True)
@@ -33,9 +33,14 @@ def paper_path(volume_root: str, paper: dict) -> str:
     return f"{volume_root}/{paper['source']}/{paper['document_id']}.{paper['file_type']}"
 
 
+def processed_stamp(moment: datetime) -> int:
+    """Encode a moment as a yyyyMMddHHmm long, the course's `processed` format."""
+    return int(moment.astimezone(UTC).strftime("%Y%m%d%H%M"))
+
+
 def _stored_file(path: str) -> StoredFile:
     # The file's mtime is when it first landed, so re-runs report the original download time
-    return StoredFile(path, datetime.fromtimestamp(os.path.getmtime(path), UTC))
+    return StoredFile(path, processed_stamp(datetime.fromtimestamp(os.path.getmtime(path), UTC)))
 
 
 def download_papers(
@@ -75,14 +80,14 @@ def download_papers(
 
 
 def with_storage(papers: Iterable[dict], stored: dict[str, StoredFile]) -> list[dict]:
-    """Return copies of papers with ``downloaded_at`` and ``volume_path`` set (None if not stored)."""
+    """Return copies of papers with ``processed`` and ``volume_path`` set (None if not stored)."""
     rows = []
     for paper in papers:
         stored_file = stored.get(paper["document_id"])
         rows.append(
             {
                 **paper,
-                "downloaded_at": stored_file.downloaded_at if stored_file else None,
+                "processed": stored_file.processed if stored_file else None,
                 "volume_path": stored_file.volume_path if stored_file else None,
             }
         )

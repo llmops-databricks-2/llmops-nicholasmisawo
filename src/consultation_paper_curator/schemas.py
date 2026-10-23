@@ -4,6 +4,7 @@ from pyspark.sql.types import (
     ArrayType,
     BooleanType,
     DateType,
+    LongType,
     StringType,
     StructField,
     StructType,
@@ -33,7 +34,8 @@ RAW_SCHEMA = StructType(
     ]
 )
 
-# Curated papers (see curation.curate), plus where each file landed in the volume
+# Curated papers (see curation.curate), written by ingestion with processed/volume_path as None
+# and filled in by the download job once each file lands in the volume
 CURATED_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
@@ -54,7 +56,7 @@ CURATED_SCHEMA = StructType(
         StructField("related_documents", ArrayType(StringType()), True),
         StructField("superseded_ids", ArrayType(StringType()), True),
         StructField("ingestion_timestamp", StringType(), True),
-        StructField("downloaded_at", TimestampType(), True),
-        StructField("volume_path", StringType(), True),
+        StructField("processed", LongType(), True),  # yyyyMMddHHmm; None until downloaded
+        StructField("volume_path", StringType(), True),  # None until downloaded
     ]
 )

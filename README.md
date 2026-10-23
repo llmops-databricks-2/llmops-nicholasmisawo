@@ -52,22 +52,30 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 
 ## 3. Data Pipelines
 
-The `bma_consultation_papers` job runs two serverless notebook tasks in sequence, both with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
+Two separate jobs, one per notebook, so each can be run on its own. Their names are numbered so the Jobs UI lists them in run order. Both are serverless notebook jobs with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
 
-| Task | Notebook | Unity Catalog table | Volume folder |
+| Job (UI name) | Notebook | Unity Catalog tables | Volume folder |
 |---|---|---|---|
-| `ingest_consultation_papers` | `01_ingest_consultation_papers.py` | `bma_consultation_papers` (raw) | — |
-| `curate_consultation_papers` | `02_curate_consultation_papers.py` | `consultation_papers` (curated) | `consultation_paper_curator_files/<source>/` |
+| `01_ingest_consultation_papers-<target>` | `01_ingest_consultation_papers.py` | `bma_consultation_papers` (raw), `consultation_papers` (curated) | — |
+| `02_download_consultation_papers-<target>` | `02_download_consultation_papers.py` | updates `consultation_papers` | `consultation_paper_curator_files/<source>/` |
 
-**Ingest** fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and overwrites the raw table as the site returns it. It downloads nothing.
+Run ingest at least once before download, since download reads the curated table:
 
-**Curate** applies the rules in `src/consultation_paper_curator/curation.py`:
+```bash
+databricks bundle run 01_ingest_consultation_papers -t dev
+databricks bundle run 02_download_consultation_papers -t dev
+```
+
+**01 Ingest** is the single ingestion workflow, following the course's `arxiv_papers` pattern. It fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and overwrites the raw table as the site returns it. It then curates them with the rules in `src/consultation_paper_curator/curation.py`:
 
 - Keeps PDFs only. Spreadsheets (BSCR models, templates, response forms) are dropped.
 - Classifies each document as `consultation_paper`, `discussion_paper`, `stakeholder_letter`, `notice`, `guidance`, `legislation` or `other` from its title prefix, falling back to the filename.
 - Takes the publication date from the upload timestamp in the CDN filename, which is more reliable than the site's listed date. For re-uploaded files it uses the original timestamp.
 - Normalizes titles (dashes, quotes, repeated prefixes) and keeps one document per title, current over archived and then newest, recording the dropped ids in `superseded_ids`.
-- Only then downloads the curated papers to the volume as `<source>/<document_id>.pdf`. It skips files already present and caps new downloads at `MAX_DOWNLOADS`, currently 5 while testing.
+
+It writes the curated `consultation_papers` table with `processed` and `volume_path` as `None` and shows a curated summary (papers by kind, open consultations, quality checks). It downloads nothing. Papers already downloaded keep their `processed` and `volume_path` when ingestion re-runs.
+
+**02 Download** fetches the curated papers whose `volume_path` is still `None` into the volume as `<source>/<document_id>.pdf`, then sets `processed` and `volume_path` on those rows with a `MERGE`. It caps new downloads at `MAX_DOWNLOADS`, currently 5 while testing.
 
 Whether a consultation is open is computed at query time (`comment_deadline >= current_date()`) rather than stored, so it never goes stale.
 
@@ -112,8 +120,8 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | `related_documents` | array\<string\> | CDN URLs from the "Related Document" menu |
 | `superseded_ids` | array\<string\> | Ids of duplicates this row replaced |
 | `ingestion_timestamp` | string | Ingest run time (UTC ISO) |
-| `downloaded_at` | timestamp | When the file landed in the volume |
-| `volume_path` | string | File location in the volume |
+| `processed` | long | Download time as `yyyyMMddHHmm`; `None` until 02 Download runs |
+| `volume_path` | string | File location in the volume; `None` until 02 Download runs |
 
 ## 4. Provisioned Databricks Resources
 
@@ -122,7 +130,7 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | Development schema | `llmops_dev.nicholasmisawo` |
 | Acceptance schema | `llmops_acc.nicholasmisawo` |
 | Production schema | `llmops_prd.nicholasmisawo` |
-| Project document volume | `consultation_paper_curator_files` (created by the curation task) |
+| Project document volume | `consultation_paper_curator_files` (created by the 02 Download job) |
 | SQL warehouse ID | `0e56acba898dad4a` |
 | Usage policy ID | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | Dev MLflow experiment | `/llmops/nicholasmisawo-dev` |
@@ -202,9 +210,10 @@ llmops-nicholasmisawo/
 ├── notebooks/
 │   └── 01_ingestion/
 │       ├── 01_ingest_consultation_papers.py
-│       └── 02_curate_consultation_papers.py
+│       └── 02_download_consultation_papers.py
 ├── resources/
-│   └── bma_consultation_papers.job.yml
+│   ├── 01_ingest_consultation_papers.job.yml
+│   └── 02_download_consultation_papers.job.yml
 ├── tests/
 │   ├── fixtures/
 │   ├── conftest.py
@@ -267,10 +276,11 @@ Pre-commit hooks format code and run the configured Ruff checks. If the hooks mo
 ```bash
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
-databricks bundle run bma_consultation_papers -t dev
+databricks bundle run 01_ingest_consultation_papers -t dev
+databricks bundle run 02_download_consultation_papers -t dev
 ```
 
-A full metadata fetch takes about four minutes. To download every source file, set `MAX_DOWNLOADS = None` in the notebook. Files already in the volume are skipped on later runs.
+A full metadata fetch takes about four minutes. To download every curated paper, set `MAX_DOWNLOADS = None` in `02_download_consultation_papers.py`. Files already in the volume are skipped on later runs.
 
 The deployment commands require Databricks authentication and the relevant target permissions.
 
