@@ -128,13 +128,13 @@ silver_df.agg(
 
 # COMMAND ----------
 # Download Papers and Set processed / volume_path
-# Off by default: until DOWNLOAD_FILES is True, processed and volume_path stay None, matching the
-# course's arxiv_papers table ("Will be set in Lecture 2.2"). When True, papers with no volume_path yet
-# are downloaded to /Volumes/<catalog>/<schema>/<volume>/<source>/<document_id>.pdf, and each row gets
-# processed (download time as yyyyMMddHHmm) and volume_path (that file's location).
+# Papers with no volume_path yet are downloaded to
+# /Volumes/<catalog>/<schema>/<volume>/<source>/<document_id>.pdf, and each row gets processed (download
+# time as yyyyMMddHHmm) and volume_path (that file's location), as in the course's arxiv_papers table
+# (Lecture 2.2). Set DOWNLOAD_FILES to False to stop after curation and leave both as None.
 
-DOWNLOAD_FILES = False
-MAX_DOWNLOADS = 5  # Capped while testing; None = download everything
+DOWNLOAD_FILES = True
+MAX_DOWNLOADS = None  # None = download everything; set a number to cap new attempts per run
 
 # Silver holds only INCLUDED_DOC_KINDS, so every pending paper is downloadable
 pending_df = spark.table(SILVER_TABLE).where(col("volume_path").isNull())
