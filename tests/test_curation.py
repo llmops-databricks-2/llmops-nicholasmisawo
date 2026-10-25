@@ -11,6 +11,7 @@ from consultation_paper_curator.curation import (
     curate,
     extract_emails,
     file_type,
+    keep_doc_kinds,
     normalize_title,
     original_upload,
 )
@@ -153,3 +154,29 @@ def test_doc_kinds_lists_every_classification() -> None:
     }
 
     assert produced == set(DOC_KINDS)
+
+
+def test_keep_doc_kinds_keeps_only_included_kinds_in_order() -> None:
+    """Papers of a listed kind are kept in their original order; every other kind is left out."""
+    papers = [
+        {"document_id": "bma_1", "doc_kind": "consultation_paper"},
+        {"document_id": "bma_2", "doc_kind": "notice"},
+        {"document_id": "bma_3", "doc_kind": "legislation"},
+        {"document_id": "bma_4", "doc_kind": "consultation_paper"},
+    ]
+
+    kept = keep_doc_kinds(papers, {"consultation_paper", "legislation"})
+
+    assert [p["document_id"] for p in kept] == ["bma_1", "bma_3", "bma_4"]
+
+
+def test_keep_doc_kinds_rejects_empty_set() -> None:
+    """Keeping nothing would empty silver, so an empty set fails instead."""
+    with pytest.raises(ValueError, match="No doc_kinds"):
+        keep_doc_kinds([{"document_id": "bma_1", "doc_kind": "notice"}], set())
+
+
+def test_keep_doc_kinds_rejects_unknown_doc_kind() -> None:
+    """A misspelt kind fails loudly instead of silently dropping that kind's papers."""
+    with pytest.raises(ValueError, match="consultation_papers"):
+        keep_doc_kinds([], {"consultation_papers"})
