@@ -36,7 +36,13 @@ def bronze_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
     """
     compared = [column for column in columns if column not in (KEY, RUN_TIMESTAMP)]
     insert_columns = ", ".join([*columns, "first_seen_at", "is_listed"])
-    insert_values = ", ".join([*(f"incoming.{column}" for column in columns), f"incoming.{RUN_TIMESTAMP}", "true"])
+    insert_values = ", ".join(
+        [
+            *(f"incoming.{column}" for column in columns),
+            f"incoming.{RUN_TIMESTAMP}",
+            "true",
+        ]
+    )
 
     return f"""
         MERGE INTO {target} AS existing

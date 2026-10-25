@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 
 import requests
 
-from consultation_paper_curator.curation import DOC_KINDS
 from consultation_paper_curator.http_client import download_file
 
 
@@ -27,18 +26,6 @@ class DownloadStats:
     downloaded: int = 0
     skipped: int = 0
     failed: int = 0
-
-
-def select_for_download(papers: Iterable[dict], excluded_doc_kinds: Iterable[str] = ()) -> list[dict]:
-    """Return the papers to download, leaving out those whose ``doc_kind`` is excluded.
-
-    Raises ValueError for an unknown kind, so a typo can't silently exclude nothing.
-    """
-    excluded = set(excluded_doc_kinds)
-    unknown = excluded - set(DOC_KINDS)
-    if unknown:
-        raise ValueError(f"Unknown doc_kind(s) {sorted(unknown)}; choose from {list(DOC_KINDS)}")
-    return [paper for paper in papers if paper["doc_kind"] not in excluded]
 
 
 def paper_path(volume_root: str, paper: dict) -> str:

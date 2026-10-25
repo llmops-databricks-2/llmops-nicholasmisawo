@@ -57,7 +57,7 @@ Two jobs, one per medallion layer, so each can be run on its own. They're named 
 | Job (UI name) | Notebook | Unity Catalog table | Volume folder |
 |---|---|---|---|
 | `bronze_consultation_papers-<target>` | `bronze_consultation_papers.py` | `bronze_consultation_papers` | — |
-| `silver_consultation_papers-<target>` | `silver_consultation_papers.py` | `silver_consultation_papers` | `consultation_paper_curator_files/<source>/` (only when `DOWNLOAD_FILES = True`) |
+| `silver_consultation_papers-<target>` | `silver_consultation_papers.py` | `silver_consultation_papers` | `consultation_papers/<source>/` (only when `DOWNLOAD_FILES = True`) |
 
 Run bronze at least once before silver, since silver reads the bronze table:
 
@@ -75,19 +75,19 @@ databricks bundle run silver_consultation_papers -t dev
 - Takes the publication date from the upload timestamp in the CDN filename, which is more reliable than the site's listed date. For re-uploaded files it uses the original timestamp.
 - Normalizes titles (dashes, quotes, repeated prefixes) and keeps one document per title, current over archived and then newest, recording the dropped ids in `superseded_ids`.
 
-New papers arrive with `processed` and `volume_path` as `None`, following the course's `arxiv_papers` pattern, and they stay `None` until you turn downloads on. The notebook's last section is gated by `DOWNLOAD_FILES` (default `False`). When it's `False` the run ends after the silver summary and still prints pending papers by `doc_kind`. Set it to `True` to download papers that have no `volume_path` yet into the volume as `<source>/<document_id>.pdf`, and set `processed` (download time as `yyyyMMddHHmm`) and `volume_path` on those rows. Downloads are capped at `MAX_DOWNLOADS` (currently 5 while testing). Kinds listed in `EXCLUDED_DOC_KINDS` (currently `notice`) are skipped; the `will_download` breakdown shows what each exclusion leaves out, and an unknown kind fails the run rather than silently excluding nothing.
+New papers arrive with `processed` and `volume_path` as `None`, following the course's `arxiv_papers` pattern, until the notebook's download section fills them in. That section is gated by `DOWNLOAD_FILES` (currently `True`): it downloads papers that have no `volume_path` yet into the volume as `<source>/<document_id>.pdf`, and sets `processed` (download time as `yyyyMMddHHmm`) and `volume_path` on those rows. Set it to `False` to end the run after the silver summary; it still prints pending papers by `doc_kind`. `MAX_DOWNLOADS` caps new download attempts per run (currently `None`, so everything pending is downloaded). Silver keeps only the kinds listed in `INCLUDED_DOC_KINDS` (currently `consultation_paper`), so those are the only papers downloaded; papers of other kinds are removed from silver by the next merge, and the run logs how many of each kind were left out. An unknown kind or an empty set fails the run rather than silently dropping papers. Silver also keeps only papers published in `MIN_PUBLISHED_YEAR` or later (currently `2020`; `None` keeps every year). While a year is set, papers with no `published_date` are left out too, since there's no telling whether they meet it. Older papers already in silver are removed by the next merge, and the run logs how many were left out.
 
 ### Medallion tables and incremental runs
 
 | Table | Layer | Holds | Written by |
 |---|---|---|---|
 | `bronze_consultation_papers` | bronze | Every document any source has listed, as it returned them, plus `first_seen_at` and `is_listed` | Bronze job |
-| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, plus `processed` and `volume_path` | Silver job |
+| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, filtered to `INCLUDED_DOC_KINDS` published in `MIN_PUBLISHED_YEAR` or later, plus `processed` and `volume_path` | Silver job |
 
 Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver`), so its layer shows in Catalog Explorer. Both are updated with `MERGE` on `document_id` rather than overwritten, so runs are incremental and safe to repeat:
 
 - **Bronze** inserts new documents and updates only rows whose content changed; a new run timestamp alone is not a change, so unchanged rows and their `first_seen_at` are left alone. Documents the site stops listing are kept with `is_listed = false` and flip back if they reappear.
-- **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Papers that no longer survive curation, for example superseded by a newer duplicate, are removed from silver; any file already downloaded for them stays in the volume.
+- **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Papers that no longer survive curation, for example superseded by a newer duplicate or left out by the kind or year filter, are removed from silver; any file already downloaded for them stays in the volume.
 - **Downloads**, when enabled, fetch only rows with no `volume_path` and skip files already in the volume.
 
 The BMA site has no "changed since" filter, so every bronze run still scrapes the full listing (about four minutes); only the writes are incremental.
@@ -149,7 +149,7 @@ Whether a consultation is open is computed at query time (`comment_deadline >= c
 | Development schema | `llmops_dev.nicholasmisawo` |
 | Acceptance schema | `llmops_acc.nicholasmisawo` |
 | Production schema | `llmops_prd.nicholasmisawo` |
-| Project document volume | `consultation_paper_curator_files` (created by the silver job when `DOWNLOAD_FILES = True`) |
+| Project document volume | `consultation_papers` (created by the silver job when `DOWNLOAD_FILES = True`) |
 | SQL warehouse ID | `0e56acba898dad4a` |
 | Usage policy ID | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | Dev MLflow experiment | `/llmops/nicholasmisawo-dev` |
@@ -264,7 +264,7 @@ llmops-nicholasmisawo/
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
 - `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks.
 - `databricks.yml`: deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
-- `project_config.yml`: environment-specific catalog, schema, volume (`consultation_paper_curator_files`), model services, and warehouse settings.
+- `project_config.yml`: environment-specific catalog, schema, volume (`consultation_papers`), model services, and warehouse settings.
 - `pyproject.toml` and `uv.lock`: Python dependencies and reproducible environment management.
 - `tests/`: automated tests for configuration, the BMA card parser, curation rules, downloads, and schema/row consistency.
 - `.github/workflows/ci.yml`: continuous integration for code-quality checks and tests.
@@ -301,7 +301,7 @@ databricks bundle run bronze_consultation_papers -t dev
 databricks bundle run silver_consultation_papers -t dev
 ```
 
-A full metadata fetch takes about four minutes. To download curated papers, set `DOWNLOAD_FILES = True` in `silver_consultation_papers.py`, and `MAX_DOWNLOADS = None` to download all of them. Files already in the volume are skipped on later runs.
+A full metadata fetch takes about four minutes. The silver job downloads every curated paper not yet in the volume (`DOWNLOAD_FILES = True`, `MAX_DOWNLOADS = None` in `silver_consultation_papers.py`); files already in the volume are skipped on later runs.
 
 The deployment commands require Databricks authentication and the relevant target permissions.
 

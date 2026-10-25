@@ -5,6 +5,7 @@ to the raw table's rows.
 """
 
 import re
+from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
@@ -180,3 +181,29 @@ def curate(raw_documents: list[dict], file_types: tuple[str, ...] = ("pdf",)) ->
     """Curate raw rows: normalize, keep only the given file types, then deduplicate."""
     curated = [curate_document(raw) for raw in raw_documents]
     return deduplicate([doc for doc in curated if doc["file_type"] in file_types])
+
+
+def keep_doc_kinds(papers: Iterable[dict], doc_kinds: Iterable[str]) -> list[dict]:
+    """Return the papers whose ``doc_kind`` is one of doc_kinds, in their original order.
+
+    Raises ValueError for an empty set (it would empty silver) or an unknown kind (a typo would
+    silently drop that kind's papers).
+    """
+    kept = set(doc_kinds)
+    if not kept:
+        raise ValueError(f"No doc_kinds to keep; choose from {list(DOC_KINDS)}")
+    unknown = kept - set(DOC_KINDS)
+    if unknown:
+        raise ValueError(f"Unknown doc_kind(s) {sorted(unknown)}; choose from {list(DOC_KINDS)}")
+    return [paper for paper in papers if paper["doc_kind"] in kept]
+
+
+def keep_published_since(papers: Iterable[dict], min_year: int | None) -> list[dict]:
+    """Return the papers published in min_year or later, in their original order.
+
+    None keeps every paper. Otherwise papers with no ``published_date`` are left out, since there's
+    no telling whether they meet the cutoff.
+    """
+    if min_year is None:
+        return list(papers)
+    return [paper for paper in papers if paper["published_date"] and paper["published_date"].year >= min_year]

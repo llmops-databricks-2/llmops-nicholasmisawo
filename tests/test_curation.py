@@ -11,6 +11,8 @@ from consultation_paper_curator.curation import (
     curate,
     extract_emails,
     file_type,
+    keep_doc_kinds,
+    keep_published_since,
     normalize_title,
     original_upload,
 )
@@ -153,3 +155,53 @@ def test_doc_kinds_lists_every_classification() -> None:
     }
 
     assert produced == set(DOC_KINDS)
+
+
+def test_keep_doc_kinds_keeps_only_included_kinds_in_order() -> None:
+    """Papers of a listed kind are kept in their original order; every other kind is left out."""
+    papers = [
+        {"document_id": "bma_1", "doc_kind": "consultation_paper"},
+        {"document_id": "bma_2", "doc_kind": "notice"},
+        {"document_id": "bma_3", "doc_kind": "legislation"},
+        {"document_id": "bma_4", "doc_kind": "consultation_paper"},
+    ]
+
+    kept = keep_doc_kinds(papers, {"consultation_paper", "legislation"})
+
+    assert [p["document_id"] for p in kept] == ["bma_1", "bma_3", "bma_4"]
+
+
+def test_keep_doc_kinds_rejects_empty_set() -> None:
+    """Keeping nothing would empty silver, so an empty set fails instead."""
+    with pytest.raises(ValueError, match="No doc_kinds"):
+        keep_doc_kinds([{"document_id": "bma_1", "doc_kind": "notice"}], set())
+
+
+def test_keep_doc_kinds_rejects_unknown_doc_kind() -> None:
+    """A misspelt kind fails loudly instead of silently dropping that kind's papers."""
+    with pytest.raises(ValueError, match="consultation_papers"):
+        keep_doc_kinds([], {"consultation_papers"})
+
+
+def test_keep_published_since_keeps_cutoff_year_and_later_in_order() -> None:
+    """Papers from the cutoff year onward are kept in order; older and undated papers are left out."""
+    papers = [
+        {"document_id": "bma_1", "published_date": date(2024, 3, 1)},
+        {"document_id": "bma_2", "published_date": date(2019, 12, 31)},
+        {"document_id": "bma_3", "published_date": None},
+        {"document_id": "bma_4", "published_date": date(2020, 1, 1)},
+    ]
+
+    kept = keep_published_since(papers, 2020)
+
+    assert [p["document_id"] for p in kept] == ["bma_1", "bma_4"]
+
+
+def test_keep_published_since_none_keeps_everything() -> None:
+    """No cutoff keeps every paper, undated ones included."""
+    papers = [
+        {"document_id": "bma_1", "published_date": date(2001, 1, 1)},
+        {"document_id": "bma_2", "published_date": None},
+    ]
+
+    assert keep_published_since(papers, None) == papers

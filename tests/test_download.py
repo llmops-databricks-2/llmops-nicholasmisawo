@@ -3,9 +3,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
-from consultation_paper_curator.download import download_papers, processed_stamp, select_for_download
+from consultation_paper_curator.download import download_papers, processed_stamp
 
 
 def paper(document_id: str) -> dict:
@@ -66,29 +64,3 @@ def test_download_papers_caps_new_attempts_including_failures(tmp_path: Path) ->
 def test_processed_stamp_is_utc_yyyymmddhhmm() -> None:
     """The processed column uses the course's yyyyMMddHHmm long format."""
     assert processed_stamp(datetime(2026, 10, 23, 1, 22, 43, tzinfo=UTC)) == 202610230122
-
-
-def test_select_for_download_leaves_out_excluded_doc_kinds() -> None:
-    """Papers of an excluded kind are not selected; the others keep their order."""
-    papers = [
-        {**paper("bma_1"), "doc_kind": "consultation_paper"},
-        {**paper("bma_2"), "doc_kind": "notice"},
-        {**paper("bma_3"), "doc_kind": "stakeholder_letter"},
-    ]
-
-    selected = select_for_download(papers, {"notice"})
-
-    assert [p["document_id"] for p in selected] == ["bma_1", "bma_3"]
-
-
-def test_select_for_download_without_exclusions_keeps_every_paper() -> None:
-    """With nothing excluded, every pending paper is selected."""
-    papers = [{**paper("bma_1"), "doc_kind": "notice"}]
-
-    assert select_for_download(papers) == papers
-
-
-def test_select_for_download_rejects_unknown_doc_kind() -> None:
-    """A misspelt kind fails loudly instead of silently excluding nothing."""
-    with pytest.raises(ValueError, match="notices"):
-        select_for_download([], {"notices"})
