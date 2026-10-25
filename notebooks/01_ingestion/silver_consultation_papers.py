@@ -46,7 +46,9 @@ INCLUDED_DOC_KINDS = {"consultation_paper"}
 MIN_PUBLISHED_YEAR = 2020
 
 if not spark.catalog.tableExists(BRONZE_TABLE):
-    raise RuntimeError(f"{BRONZE_TABLE} not found; run the bronze_consultation_papers job first")
+    raise RuntimeError(
+        f"{BRONZE_TABLE} not found; run the bronze_consultation_papers task of consultation_papers_pipeline first"
+    )
 
 ensure_table(
     spark,
