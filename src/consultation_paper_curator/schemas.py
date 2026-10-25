@@ -4,6 +4,8 @@ from pyspark.sql.types import (
     ArrayType,
     BooleanType,
     DateType,
+    FloatType,
+    IntegerType,
     LongType,
     StringType,
     StructField,
@@ -77,3 +79,35 @@ STORAGE_FIELDS = [
 
 # silver_consultation_papers: curated papers plus where each file landed in the volume
 SILVER_SCHEMA = StructType([*SILVER_METADATA_SCHEMA.fields, *STORAGE_FIELDS])
+
+# silver_parsed_consultation_papers: ai_parse_document output for each downloaded silver paper, parsed once
+PARSED_SCHEMA = StructType(
+    [
+        StructField("document_id", StringType(), False),
+        StructField("volume_path", StringType(), True),
+        StructField("parsed_content", StringType(), True),  # ai_parse_document VARIANT as JSON
+        StructField("parse_errors", StringType(), True),  # Per-page error_status as JSON; None when all pages parsed
+        StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that parsed the file
+    ]
+)
+
+# gold_consultation_paper_chunks: cleaned text chunks with the paper's metadata and an embedding, the RAG source
+CHUNKS_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), False),  # <document_id>_<chunk_id>, the vector index primary key
+        StructField("document_id", StringType(), False),
+        StructField("chunk_id", StringType(), True),
+        StructField("page_id", IntegerType(), True),  # Page the chunk starts on, for citations
+        StructField("text", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("doc_kind", StringType(), True),
+        StructField("institution", StringType(), True),
+        StructField("published_date", DateType(), True),
+        StructField("comment_deadline", DateType(), True),
+        StructField("topics", ArrayType(StringType()), True),
+        StructField("is_archived", BooleanType(), True),
+        StructField("file_url", StringType(), True),
+        StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that chunked the paper
+        StructField("embedding", ArrayType(FloatType()), True),
+    ]
+)
