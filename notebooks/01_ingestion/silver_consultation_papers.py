@@ -14,6 +14,7 @@ from consultation_paper_curator.curation import (
     curate,
     curate_document,
     keep_doc_kinds,
+    keep_published_since,
 )
 from consultation_paper_curator.download import download_papers
 from consultation_paper_curator.http_client import create_session
@@ -39,6 +40,10 @@ volume_root = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
 # already in silver are removed by the next merge, and a kind the classifier adds later stays out
 # until it's listed here.
 INCLUDED_DOC_KINDS = {"consultation_paper"}
+# Earliest publication year kept in silver (and so downloaded); None keeps every year. Undated papers
+# are left out while a year is set, and papers older than it already in silver are removed by the next
+# merge.
+MIN_PUBLISHED_YEAR = 2020
 
 if not spark.catalog.tableExists(BRONZE_TABLE):
     raise RuntimeError(f"{BRONZE_TABLE} not found; run the bronze_consultation_papers job first")
@@ -49,7 +54,9 @@ ensure_table(
     SILVER_SCHEMA,
     layer="silver",
     comment="Silver: curated consultation papers (PDFs only, classified, deduplicated, "
-    f"kinds {sorted(INCLUDED_DOC_KINDS)} only); "
+    f"kinds {sorted(INCLUDED_DOC_KINDS)} only"
+    + (f", published {MIN_PUBLISHED_YEAR} or later" if MIN_PUBLISHED_YEAR else "")
+    + "); "
     "processed and volume_path stay None until files are downloaded.",
 )
 logger.info(f"Table {SILVER_TABLE} ready")
@@ -58,14 +65,16 @@ logger.info(f"Table {SILVER_TABLE} ready")
 # Curate Bronze into the Silver Table
 # Keeps PDFs only (spreadsheets such as BSCR models and templates can't feed the RAG pipeline),
 # classifies each document, takes the publication date from the CDN filename, and keeps one
-# document per title (current over archived, then newest), then keeps only the INCLUDED_DOC_KINDS so
-# silver holds only papers that will be downloaded. Curation runs over all of bronze because
-# deduplication needs every document, then upserts: new papers arrive with processed and volume_path
-# as None, and the MERGE never overwrites values set by a download.
+# document per title (current over archived, then newest), then keeps only the INCLUDED_DOC_KINDS
+# published in MIN_PUBLISHED_YEAR or later so silver holds only papers that will be downloaded.
+# Curation runs over all of bronze because deduplication needs every document, then upserts: new
+# papers arrive with processed and volume_path as None, and the MERGE never overwrites values set by
+# a download.
 
 bronze_documents = [row.asDict(recursive=True) for row in spark.table(BRONZE_TABLE).collect()]
 curated = curate(bronze_documents)
-papers = keep_doc_kinds(curated, INCLUDED_DOC_KINDS)
+of_kind = keep_doc_kinds(curated, INCLUDED_DOC_KINDS)
+papers = keep_published_since(of_kind, MIN_PUBLISHED_YEAR)
 
 spark.createDataFrame(papers, schema=SILVER_METADATA_SCHEMA).createOrReplaceTempView("curated_papers")
 silver_merge = spark.sql(silver_merge_sql(SILVER_TABLE, "curated_papers", SILVER_METADATA_SCHEMA.fieldNames()))
@@ -76,7 +85,11 @@ logger.info(f"Bronze documents: {len(bronze_documents)} by file type: {dict(file
 left_out_kinds = Counter(paper["doc_kind"] for paper in curated if paper["doc_kind"] not in INCLUDED_DOC_KINDS)
 logger.info(f"Curated papers: {len(curated)} ({superseded} duplicates superseded)")
 logger.info(f"Doc kinds: {list(DOC_KINDS)}; keeping: {sorted(INCLUDED_DOC_KINDS)}")
-logger.info(f"Papers kept for silver: {len(papers)} (left out by kind: {dict(left_out_kinds)})")
+logger.info(f"Papers of the kept kinds: {len(of_kind)} (left out by kind: {dict(left_out_kinds)})")
+logger.info(
+    f"Papers kept for silver: {len(papers)} (min published year: {MIN_PUBLISHED_YEAR}; "
+    f"{len(of_kind) - len(papers)} older or undated left out)"
+)
 logger.info(f"Merged into {SILVER_TABLE}:")
 silver_merge.show()
 

@@ -196,3 +196,14 @@ def keep_doc_kinds(papers: Iterable[dict], doc_kinds: Iterable[str]) -> list[dic
     if unknown:
         raise ValueError(f"Unknown doc_kind(s) {sorted(unknown)}; choose from {list(DOC_KINDS)}")
     return [paper for paper in papers if paper["doc_kind"] in kept]
+
+
+def keep_published_since(papers: Iterable[dict], min_year: int | None) -> list[dict]:
+    """Return the papers published in min_year or later, in their original order.
+
+    None keeps every paper. Otherwise papers with no ``published_date`` are left out, since there's
+    no telling whether they meet the cutoff.
+    """
+    if min_year is None:
+        return list(papers)
+    return [paper for paper in papers if paper["published_date"] and paper["published_date"].year >= min_year]
