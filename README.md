@@ -1,4 +1,4 @@
-# Consultation Paper Curator
+# BMA Consultation Paper Curator
 
 **Databricks LLMOps | Regulatory Consultation Intelligence**
 
@@ -52,19 +52,21 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 
 ## 3. Data Pipelines
 
-Two jobs, one per medallion layer, so each can be run on its own. They're named after the table they write, so the Jobs UI lists bronze before silver. Both are serverless notebook jobs with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
+One job, `consultation_papers_pipeline-<target>`, runs the stages in order; each task starts only once the one before it succeeds. Every task is a serverless notebook with the packaged project wheel installed and environment-specific settings from `project_config.yml`:
 
-| Job (UI name) | Notebook | Unity Catalog table | Volume folder |
+| Task | Notebook | Unity Catalog tables | Volume folder |
 |---|---|---|---|
-| `bronze_consultation_papers-<target>` | `bronze_consultation_papers.py` | `bronze_consultation_papers` | — |
-| `silver_consultation_papers-<target>` | `silver_consultation_papers.py` | `silver_consultation_papers` | `consultation_papers/<source>/` (only when `DOWNLOAD_FILES = True`) |
+| `bronze_consultation_papers` | `01_ingestion/bronze_consultation_papers.py` | `bronze_consultation_papers` | — |
+| `silver_consultation_papers` | `01_ingestion/silver_consultation_papers.py` | `silver_consultation_papers` | `consultation_papers/<source>/` (only when `DOWNLOAD_FILES = True`) |
+| `process_consultation_papers` | `02_processing/process_consultation_papers.py` | `silver_parsed_consultation_papers`, `gold_consultation_paper_chunks` | — (reads the silver downloads) |
 
-Run bronze at least once before silver, since silver reads the bronze table:
+The job runs weekly, Mondays at 06:00 Bermuda time (`Atlantic/Bermuda`). The schedule is paused in `dev` and `acc` and active in `prd`, set by the `schedule_pause_status` bundle variable in `databricks.yml`; the usage policy comes from the `usage_policy_id` variable. Run it by hand with:
 
 ```bash
-databricks bundle run bronze_consultation_papers -t dev
-databricks bundle run silver_consultation_papers -t dev
+databricks bundle run consultation_papers_pipeline -t dev
 ```
+
+To run a single stage, start a run from the job page and choose that task. Each stage needs the one before it to have run at least once.
 
 **Bronze** fetches current and archived documents in the *Regulatory Legislative Documents* type under the *Discussion/Consultation Papers* and *Thematic Review* categories, tags each with the site's category and topic/sector filters, and upserts them into bronze. It downloads nothing.
 
@@ -81,14 +83,17 @@ New papers arrive with `processed` and `volume_path` as `None`, following the co
 
 | Table | Layer | Holds | Written by |
 |---|---|---|---|
-| `bronze_consultation_papers` | bronze | Every document any source has listed, as it returned them, plus `first_seen_at` and `is_listed` | Bronze job |
-| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, filtered to `INCLUDED_DOC_KINDS` published in `MIN_PUBLISHED_YEAR` or later, plus `processed` and `volume_path` | Silver job |
+| `bronze_consultation_papers` | bronze | Every document any source has listed, as it returned them, plus `first_seen_at` and `is_listed` | Bronze task |
+| `silver_consultation_papers` | silver | Curated papers: PDFs only, classified, deduplicated, filtered to `INCLUDED_DOC_KINDS` published in `MIN_PUBLISHED_YEAR` or later, plus `processed` and `volume_path` | Silver task |
+| `silver_parsed_consultation_papers` | silver | `ai_parse_document` output (as JSON) for each downloaded paper, parsed once | Process task |
+| `gold_consultation_paper_chunks` | gold | Cleaned text and table chunks with page, paper metadata and embedding; Change Data Feed on for a Vector Search index | Process task |
 
 Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver`), so its layer shows in Catalog Explorer. Both are updated with `MERGE` on `document_id` rather than overwritten, so runs are incremental and safe to repeat:
 
 - **Bronze** inserts new documents and updates only rows whose content changed; a new run timestamp alone is not a change, so unchanged rows and their `first_seen_at` are left alone. Documents the site stops listing are kept with `is_listed = false` and flip back if they reappear.
 - **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Papers that no longer survive curation, for example superseded by a newer duplicate or left out by the kind or year filter, are removed from silver; any file already downloaded for them stays in the volume.
 - **Downloads**, when enabled, fetch only rows with no `volume_path` and skip files already in the volume.
+- **Processing** parses only downloaded papers not yet in `silver_parsed_consultation_papers` and chunks only parsed papers not yet in `gold_consultation_paper_chunks`, so each paper is parsed and embedded once. Parsed rows and chunks of papers silver no longer holds are deleted, so retrieval never answers from a superseded duplicate.
 
 The BMA site has no "changed since" filter, so every bronze run still scrapes the full listing (about four minutes); only the writes are incremental.
 
@@ -221,25 +226,28 @@ llmops-nicholasmisawo/
 │   └── consultation_paper_curator/
 │       ├── config.py
 │       ├── curation.py        # rules that turn bronze rows into silver papers
+│       ├── data_processor.py  # parse, chunk and embed downloaded papers
 │       ├── download.py        # download curated papers into the volume
 │       ├── http_client.py     # retrying HTTP session and file download
-│       ├── schemas.py         # Spark schemas of the bronze and silver tables
+│       ├── schemas.py         # Spark schemas of the medallion tables
 │       ├── tables.py          # create/label tables and build their incremental MERGEs
 │       └── sources/
 │           └── bma.py         # BMA documents-centre scraper
 ├── notebooks/
-│   └── 01_ingestion/
-│       ├── bronze_consultation_papers.py
-│       └── silver_consultation_papers.py
+│   ├── 01_ingestion/
+│   │   ├── bronze_consultation_papers.py
+│   │   └── silver_consultation_papers.py
+│   └── 02_processing/
+│       └── process_consultation_papers.py
 ├── resources/
-│   ├── bronze_consultation_papers.job.yml
-│   └── silver_consultation_papers.job.yml
+│   └── consultation_papers_pipeline.job.yml
 ├── tests/
 │   ├── fixtures/
 │   ├── conftest.py
 │   ├── test_bma_source.py
 │   ├── test_config.py
 │   ├── test_curation.py
+│   ├── test_data_processor.py
 │   ├── test_download.py
 │   ├── test_schemas.py
 │   └── test_tables.py
@@ -259,11 +267,11 @@ llmops-nicholasmisawo/
 
 - `src/consultation_paper_curator/`: reusable Python package for configuration (including the assistant system prompt), source scrapers, curation rules, downloads, table schemas and MERGEs, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `SOURCE_SCHEMA`.
 - `notebooks/01_ingestion/`: data ingestion and curation pipelines, starting with BMA consultation papers.
-- `notebooks/02_processing/`: planned document extraction, cleaning, chunking, and preparation for embeddings.
+- `notebooks/02_processing/`: PDF parsing with `ai_parse_document`, chunk cleaning, and embedding (`data_processor.py`).
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
-- `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks.
-- `databricks.yml`: deployment targets (`dev`, `acc`, `prd`) and bundle configuration.
+- `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks: one scheduled pipeline job.
+- `databricks.yml`: deployment targets (`dev`, `acc`, `prd`), bundle variables (`usage_policy_id`, `schedule_pause_status`), and bundle configuration.
 - `project_config.yml`: environment-specific catalog, schema, volume (`consultation_papers`), model services, and warehouse settings.
 - `pyproject.toml` and `uv.lock`: Python dependencies and reproducible environment management.
 - `tests/`: automated tests for configuration, the BMA card parser, curation rules, downloads, and schema/row consistency.
@@ -297,8 +305,7 @@ Pre-commit hooks format code and run the configured Ruff checks. If the hooks mo
 ```bash
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
-databricks bundle run bronze_consultation_papers -t dev
-databricks bundle run silver_consultation_papers -t dev
+databricks bundle run consultation_papers_pipeline -t dev
 ```
 
 A full metadata fetch takes about four minutes. The silver job downloads every curated paper not yet in the volume (`DOWNLOAD_FILES = True`, `MAX_DOWNLOADS = None` in `silver_consultation_papers.py`); files already in the volume are skipped on later runs.
