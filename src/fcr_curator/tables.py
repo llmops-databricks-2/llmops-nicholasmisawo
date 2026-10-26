@@ -27,6 +27,42 @@ def ensure_table(spark: SparkSession, name: str, schema: StructType, layer: str,
     spark.sql(f"ALTER TABLE {name} SET TBLPROPERTIES ('quality' = '{layer}')")
 
 
+def add_missing_columns(spark: SparkSession, name: str, schema: StructType) -> list[str]:
+    """Add to the table any column of schema it doesn't have yet (Delta appends them); return their names.
+
+    ensure_table creates a table from its schema only once, so columns added to the schema later need this.
+    """
+    existing = set(spark.table(name).columns)
+    missing = [field for field in schema.fields if field.name not in existing]
+    if missing:
+        columns = ", ".join(f"{field.name} {field.dataType.simpleString()}" for field in missing)
+        spark.sql(f"ALTER TABLE {name} ADD COLUMNS ({columns})")
+    return [field.name for field in missing]
+
+
+def column_moves(current: list[str], wanted: list[str]) -> list[tuple[str, str | None]]:
+    """Return the moves that put current's columns in wanted's order: (column, column to follow or None for first).
+
+    Columns not in wanted keep their place after the others. No moves if the order is already right.
+    """
+    ordered = [column for column in wanted if column in current]
+    if [column for column in current if column in ordered] == ordered:
+        return []
+    return [(column, ordered[index - 1] if index else None) for index, column in enumerate(ordered)]
+
+
+def align_column_order(spark: SparkSession, name: str, schema: StructType) -> int:
+    """Put the table's columns in its schema's order; return how many moves that took.
+
+    Columns added to a schema later land at the end of an existing table (see add_missing_columns), so
+    this keeps the table reading the way the schema does. Moving a Delta column only changes metadata.
+    """
+    moves = column_moves(spark.table(name).columns, schema.fieldNames())
+    for column, after in moves:
+        spark.sql(f"ALTER TABLE {name} ALTER COLUMN {column} {'FIRST' if after is None else f'AFTER {after}'}")
+    return len(moves)
+
+
 def _changed(column: str, new_value: str) -> str:
     # <=> treats two NULLs as equal, so a change to or from NULL still counts
     return f"NOT (existing.{column} <=> {new_value})"
@@ -141,6 +177,21 @@ def record_downloads_sql(target: str, downloads_view: str) -> str:
 
 
 # --- Gold -------------------------------------------------------------------------------------
+
+
+def refresh_chunk_metadata_sql(chunks_table: str, documents_table: str, columns: list[str]) -> str:
+    """MERGE silver's current metadata onto the chunks of each FCR, where it has changed.
+
+    Chunks are written once, so without this they keep the metadata they had then: a better institution
+    name, a reporting year fixed by curation, or a new registered_name wouldn't reach search.
+    """
+    return f"""
+        MERGE INTO {chunks_table} AS existing
+        USING {documents_table} AS document
+        ON existing.{KEY} = document.{KEY}
+        WHEN MATCHED AND ({" OR ".join(_changed(column, f"document.{column}") for column in columns)}) THEN
+            UPDATE SET {", ".join(f"existing.{column} = document.{column}" for column in columns)}
+    """
 
 
 def record_embeddings_sql(target: str, embeddings_view: str) -> str:

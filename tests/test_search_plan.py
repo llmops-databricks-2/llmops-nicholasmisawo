@@ -40,7 +40,7 @@ def test_plan_asks_known_domains_missing_the_latest_year_first() -> None:
 
 def test_plan_skips_institutions_silver_already_holds_for_the_latest_year() -> None:
     """A named institution is searched only until silver has its latest FCR, matched loosely by name."""
-    known = Coverage({}, {"examplereltd": {2025}})
+    known = Coverage({}, {"Example Re Ltd.": {2025}})
 
     queries = [query.query for query in plan(known, institutions=("Example Re", "Other Insurance Ltd."))]
 
@@ -95,7 +95,7 @@ def test_coverage_collects_years_by_domain_and_institution() -> None:
     )
 
     assert known.domains == {"example-re.com": {2024}}
-    assert known.institutions == {"examplereltd": {2024}}
+    assert known.institutions == {"Example Re Ltd.": {2024}}
 
 
 def test_worst_case_searches_counts_every_page_a_plan_may_ask_for() -> None:
@@ -124,3 +124,13 @@ def test_discovery_searches_both_names_bermuda_insurers_use() -> None:
 
     assert any(query.startswith('"financial condition report"') for query in queries)
     assert any(query.startswith('"solvency and financial condition report"') for query in queries)
+
+
+def test_a_generic_institution_name_in_silver_covers_no_one() -> None:
+    """A silver row named just "Group" mustn't make every "... Group" insurer look covered and go unsearched."""
+    known = Coverage({}, {"Group": {2025}})
+
+    queries = [query.query for query in plan(known, institutions=("Arch Capital Group", "Enstar Group"))]
+
+    assert institution_query("Arch Capital Group") in queries
+    assert institution_query("Enstar Group") in queries

@@ -23,8 +23,8 @@ from fcr_curator.chunking import Chunk, element_chunks, section_chunks
 from fcr_curator.config import ProjectConfig
 from fcr_curator.download import processed_stamp
 from fcr_curator.gateway import EmbedBatch, embed_texts
-from fcr_curator.schemas import CHUNKS_SCHEMA, EMBEDDED_CHUNKS_SCHEMA, EMBEDDING_FIELD, PARSED_SCHEMA
-from fcr_curator.tables import KEY, ensure_table, record_embeddings_sql
+from fcr_curator.schemas import CHUNKS_SCHEMA, EMBEDDED_CHUNKS_SCHEMA, PARSED_SCHEMA
+from fcr_curator.tables import KEY, add_missing_columns, ensure_table, record_embeddings_sql, refresh_chunk_metadata_sql
 
 # Turn off the model-written figure descriptions: they cost extra, and chunks only use text and tables
 PARSE_OPTIONS = "map('version', '2.0', 'descriptionElementTypes', '')"
@@ -37,6 +37,8 @@ CHUNKING_STRATEGIES: dict[str, Callable[[str | None], list[Chunk]]] = {
 }
 # The strategy kept for search: its chunks are embedded and synced to Lakebase
 SEARCH_CHUNKS_TABLE = "gold_fcr_chunks_by_section"
+# Silver columns every chunk carries, kept current on each run
+CHUNK_METADATA_COLUMNS = ["title", "institution", "registered_name", "domain", "reporting_year", "file_url"]
 # Chunks embedded and saved per batch, so a failure keeps the batches already done
 EMBED_SAVE_BATCH = 2000
 
@@ -68,6 +70,7 @@ class DataProcessor:
         self.remove_dropped_documents()
         logger.info(f"Parsed {self.parse_pending_documents()} documents into {self.parsed_table}")
         for table, chunker in self.chunk_tables.items():
+            self.refresh_chunk_metadata(table)
             logger.info(f"Wrote {self.chunk_parsed_documents(table, chunker)} chunks to {table}")
         if self.embed:
             logger.info(f"Embedded {self.embed_pending_chunks()} chunks in {self.search_table}")
@@ -91,10 +94,13 @@ class DataProcessor:
                 " and embeddings; synced to Lakebase for search." if searched else "; not embedded."
             )
             ensure_table(self.spark, table, schema, layer="gold", comment=comment)
-            if searched and EMBEDDING_FIELD.name not in self.spark.table(table).columns:  # Created before embeddings
-                self.spark.sql(f"ALTER TABLE {table} ADD COLUMNS ({EMBEDDING_FIELD.name} ARRAY<FLOAT>)")
+            add_missing_columns(self.spark, table, schema)  # Columns added to the schema after the table was made
             # Change Data Feed lets a Lakebase synced table follow this table's changes
             self.spark.sql(f"ALTER TABLE {table} SET TBLPROPERTIES (delta.enableChangeDataFeed = true)")
+
+    def refresh_chunk_metadata(self, table: str) -> None:
+        """Bring the metadata on table's existing chunks up to date with silver."""
+        self.spark.sql(refresh_chunk_metadata_sql(table, self.documents_table, CHUNK_METADATA_COLUMNS))
 
     def remove_dropped_documents(self) -> None:
         """Delete parsed rows and chunks of FCRs silver no longer has (filtered out or duplicates)."""
@@ -132,9 +138,7 @@ class DataProcessor:
         """Chunk the parsed FCRs not yet in table with chunker, add their metadata; return the chunks written."""
         chunker_udf = udf(chunker, CHUNK_TYPE)
         already_chunked = self.spark.table(table).select(KEY).distinct()
-        metadata = self.spark.table(self.documents_table).select(
-            KEY, "title", "institution", "domain", "reporting_year", "file_url"
-        )
+        metadata = self.spark.table(self.documents_table).select(KEY, *CHUNK_METADATA_COLUMNS)
 
         chunks_df: DataFrame = (
             self.spark.table(self.parsed_table)

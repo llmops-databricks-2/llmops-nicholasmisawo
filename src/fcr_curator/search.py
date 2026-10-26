@@ -16,11 +16,12 @@ from dataclasses import dataclass
 import psycopg
 from psycopg import sql
 
+from fcr_curator.curation import institution_key
+
 DEFAULT_LIMIT = 20
 RRF_K = 60  # The usual Reciprocal Rank Fusion constant: damps the weight of the very top ranks
-# Dropped from an institution name before matching, so "Wilton Re Ltd." still finds wiltonre.bm
-LEGAL_SUFFIXES = re.compile(r"\b(?:ltd|limited|inc|plc|llc|sa|se|ag|group)\b\.?", re.IGNORECASE)
-HIT_COLUMNS = sql.SQL("id, text, institution, reporting_year, page_id, file_url")
+# A hit is named after its reference-list entity when it has one, else as its title gives it
+HIT_COLUMNS = sql.SQL("id, text, coalesce(registered_name, institution), reporting_year, page_id, file_url")
 
 
 @dataclass(frozen=True)
@@ -40,11 +41,6 @@ class SearchHit:
         return None if self.page_id is None else self.page_id + 1
 
 
-def institution_key(name: str) -> str:
-    """Return a name reduced to lower-case letters and digits, legal suffixes removed: 'Wilton Re Ltd.' -> 'wiltonre'."""
-    return re.sub(r"[^a-z0-9]", "", LEGAL_SUFFIXES.sub("", name).lower())
-
-
 @dataclass(frozen=True)
 class SearchFilters:
     """Metadata a search is limited to; None means any."""
@@ -56,11 +52,12 @@ class SearchFilters:
         """Return the SQL condition for these filters and its parameters."""
         conditions, params = [sql.SQL("TRUE")], []
         if self.institution:
-            # Institution names come from titles and are messy (wiltonre.bm, 2024 Group), so the key is
-            # matched against the institution, domain and title together
+            # Titles give messy names (wiltonre.bm, 2024 Group), so the key is matched against the reference
+            # name, institution, domain and title together
             conditions.append(
                 sql.SQL(
-                    "regexp_replace(lower(concat_ws(' ', institution, domain, title)), '[^a-z0-9]', '', 'g') LIKE %s"
+                    "regexp_replace(lower(concat_ws(' ', registered_name, institution, domain, title)),"
+                    " '[^a-z0-9]', '', 'g') LIKE %s"
                 )
             )
             params.append(f"%{institution_key(self.institution)}%")

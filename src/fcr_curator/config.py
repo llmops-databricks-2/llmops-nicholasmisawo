@@ -6,7 +6,7 @@ from textwrap import dedent
 import yaml
 from pydantic import BaseModel, Field
 
-# Folders searched for project_config.yml: the current one and its parents
+# Folders searched for a project file: the current one and its parents
 CONFIG_SEARCH_DEPTH = 3
 
 
@@ -30,14 +30,16 @@ class ProjectConfig(BaseModel):
     system_prompt: str = Field(
         default=dedent("""
             You are FCR Curator, specialising in the Financial Condition
-            Reports (FCRs) that Bermuda commercial insurers publish under
-            the Bermuda Monetary Authority's public disclosure rules.
+            Reports (FCRs) that Bermuda commercial insurers and reinsurers
+            publish under the Bermuda Monetary Authority's public disclosure
+            rules.
 
             Help analysts, risk, and compliance teams find, compare, and
-            understand the financial condition of Bermuda insurers.
+            understand the financial condition of Bermuda insurers and reinsurers.
 
             CAPABILITIES
-            - Retrieve and summarise an insurer's FCR for a reporting year.
+            - Retrieve and summarise an insurer's or reinsurer's FCR for a
+              reporting year.
             - Surface solvency ratios, capital, risk profile, governance,
               and business performance as each FCR reports them.
             - Compare institutions, or one institution across years.
@@ -108,13 +110,19 @@ class ProjectConfig(BaseModel):
         return f"{self.catalog}.{self.schema}.{self.volume}"
 
 
-def load_config(config_path: str = "project_config.yml", env: str = "dev") -> ProjectConfig:
-    """Load the settings for env, looking for a relative config_path in the current folder and its parents.
+def find_project_file(relative_path: str) -> Path:
+    """Return a file at the repository root, looking in the current folder and its parents.
 
-    Notebooks run from notebooks/<stage>/, so the config at the repository root is two levels up.
+    Notebooks run from notebooks/<stage>/, so files at the repository root are two levels up. An absolute
+    path, or one found nowhere, is returned as given.
     """
-    path = Path(config_path)
-    if not path.is_absolute():
-        folders = [Path.cwd(), *Path.cwd().parents][:CONFIG_SEARCH_DEPTH]
-        path = next((folder / config_path for folder in folders if (folder / config_path).exists()), path)
-    return ProjectConfig.from_yaml(str(path), env)
+    path = Path(relative_path)
+    if path.is_absolute():
+        return path
+    folders = [Path.cwd(), *Path.cwd().parents][:CONFIG_SEARCH_DEPTH]
+    return next((folder / path for folder in folders if (folder / path).exists()), path)
+
+
+def load_config(config_path: str = "project_config.yml", env: str = "dev") -> ProjectConfig:
+    """Load the settings for env from config_path (see find_project_file)."""
+    return ProjectConfig.from_yaml(str(find_project_file(config_path)), env)

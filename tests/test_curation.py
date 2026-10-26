@@ -10,10 +10,13 @@ from fcr_curator.curation import (
     curate,
     file_type,
     institution,
+    institution_key,
     keep_doc_kinds,
     keep_reported_since,
     normalize_title,
+    on_domain,
     reporting_year,
+    same_institution,
 )
 
 TODAY = date(2026, 10, 25)
@@ -209,3 +212,86 @@ def test_curate_leaves_the_bronze_rows_it_was_given_unchanged() -> None:
     curate(rows, today=TODAY)
 
     assert rows == before
+
+
+def test_institution_key_ignores_case_punctuation_and_legal_suffixes() -> None:
+    """'Wilton Re Ltd.' and 'wilton re' are the same insurer."""
+    assert institution_key("Wilton Re Ltd.") == institution_key("wilton re") == "wiltonre"
+
+
+@pytest.mark.parametrize(
+    ("name", "other"),
+    [("Everest Re", "Everest Reinsurance (Bermuda) Ltd"), ("Hamilton Insurance Group", "Hamilton Insurance Group")],
+)
+def test_same_institution_matches_a_name_and_its_longer_form(name: str, other: str) -> None:
+    """A short name matches the full name it starts, in either order."""
+    assert same_institution(name, other) and same_institution(other, name)
+
+
+@pytest.mark.parametrize(
+    ("name", "other"),
+    [("Arch Capital Group", "Group"), ("Argo Group", "Cargo Insurance"), ("Re", "Renaissance Reinsurance")],
+)
+def test_same_institution_rejects_generic_short_and_embedded_names(name: str, other: str) -> None:
+    """A bare suffix, a key too short to be specific, or a name inside another word is not a match."""
+    assert not same_institution(name, other)
+
+
+def test_curate_leaves_registered_name_unset_without_a_reference_list() -> None:
+    """Without a resolver there's nothing to match against, so no FCR gets a registered name."""
+    [document] = curate([raw("a", "Example Re Ltd. FCR 2024", "https://x.com/a.pdf")], today=TODAY)
+
+    assert document["registered_name"] is None
+
+
+def test_curate_names_each_fcr_with_the_resolvers_answer() -> None:
+    """The resolver sees the curated fields and its answer becomes registered_name."""
+    seen: list[dict] = []
+
+    def resolve(document: dict) -> str:
+        seen.append(document)
+        return "Example Re"
+
+    [document] = curate(
+        [raw("a", "Example Re Ltd. FCR 2024", "https://x.com/a.pdf")], today=TODAY, resolve_entity=resolve
+    )
+
+    assert document["registered_name"] == "Example Re"
+    assert seen[0]["institution"] == "Example Re Ltd." and seen[0]["domain"] == "example-re.com"
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"), [("cdn.bma.bm", True), ("bma.bm", True), ("notbma.bm", False), (None, False)]
+)
+def test_on_domain_matches_the_domain_and_its_subdomains_only(host: str | None, expected: bool) -> None:
+    """A subdomain is on its parent domain; a different domain ending in the same letters isn't."""
+    assert on_domain(host, "bma.bm") is expected
+
+
+def test_curate_keeps_an_fcr_and_annual_accounts_for_the_same_insurer_and_year() -> None:
+    """Different kinds of document aren't duplicates, so the accounts can't push out the FCR."""
+    documents = curate(
+        [
+            raw("accounts", "Example Re Annual Financial Statements 2024", "https://x.com/accounts-2024.pdf"),
+            raw("fcr", "Example Re Financial Condition Report 2024", "https://x.com/fcr-2024.pdf"),
+        ],
+        today=TODAY,
+    )
+
+    assert {document["doc_kind"] for document in documents} == {"fcr", "other"}
+
+
+def test_curate_keeps_one_row_for_a_file_found_by_two_sources() -> None:
+    """The same PDF from a search and from a disclosures page is one document, not two."""
+    url = "https://x.com/example-re-fcr-2024.pdf"
+    documents = curate(
+        [
+            raw("serpapi_a", "Example Re Ltd. FCR 2024", url, search_rank=2),
+            raw("pages_a", "View", url, search_rank=None, site_name="Example Re"),
+        ],
+        today=TODAY,
+    )
+
+    assert [(document["document_id"], document["superseded_ids"]) for document in documents] == [
+        ("serpapi_a", ["pages_a"])
+    ]

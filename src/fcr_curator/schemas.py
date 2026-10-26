@@ -63,7 +63,8 @@ SILVER_METADATA_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
         StructField("source", StringType(), True),
-        StructField("institution", StringType(), True),
+        StructField("registered_name", StringType(), True),  # As the reference list gives it; None if not on it
+        StructField("institution", StringType(), True),  # As the FCR's title gives it
         StructField("domain", StringType(), True),
         StructField("title", StringType(), False),
         StructField("doc_kind", StringType(), False),
@@ -110,6 +111,7 @@ CHUNKS_SCHEMA = StructType(
         StructField("text", StringType(), True),
         StructField("title", StringType(), True),
         StructField("institution", StringType(), True),
+        StructField("registered_name", StringType(), True),
         StructField("domain", StringType(), True),
         StructField("reporting_year", IntegerType(), True),
         StructField("file_url", StringType(), True),

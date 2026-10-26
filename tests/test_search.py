@@ -1,16 +1,11 @@
 """Tests for searching the synced FCR chunks: filters, keyword queries and rank fusion."""
 
-from fcr_curator.search import SearchFilters, SearchHit, any_word_query, institution_key, reciprocal_rank_fusion
+from fcr_curator.search import SearchFilters, SearchHit, any_word_query, reciprocal_rank_fusion
 
 
 def hit(hit_id: str) -> SearchHit:
     """Build a search hit with only an id that matters."""
     return SearchHit(hit_id, "text", "Example Re", 2024, 0, "https://x.com/a.pdf")
-
-
-def test_institution_key_matches_names_however_they_are_written() -> None:
-    """Case, punctuation, spacing and legal suffixes don't change the key."""
-    assert institution_key("Wilton Re Ltd.") == institution_key("wilton re") == "wiltonre"
 
 
 def test_filters_without_values_match_everything() -> None:

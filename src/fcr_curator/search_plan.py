@@ -15,7 +15,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from fcr_curator.curation import EXCLUDED_DOMAINS, dedupe_key
+from fcr_curator.curation import EXCLUDED_DOMAINS, same_institution
 
 # Added to open-ended queries so pages from excluded sites don't use up paid result slots
 EXCLUDED_SITES = " ".join(f"-site:{domain}" for domain in EXCLUDED_DOMAINS)
@@ -61,7 +61,7 @@ class Coverage:
     """Reporting years silver already has an FCR for, by domain and by institution."""
 
     domains: Mapping[str, set[int]]
-    institutions: Mapping[str, set[int]]  # Keyed by dedupe_key(institution)
+    institutions: Mapping[str, set[int]]  # Keyed by silver's institution name
 
 
 # --- Query text -------------------------------------------------------------------------------
@@ -91,7 +91,7 @@ def coverage(silver_rows: Iterable[dict]) -> Coverage:
         if row.get("domain"):
             domains[row["domain"]].add(year)
         if row.get("institution"):
-            institutions[dedupe_key(row["institution"])].add(year)
+            institutions[row["institution"]].add(year)
     return Coverage(dict(domains), dict(institutions))
 
 
@@ -126,11 +126,7 @@ def is_due(history: QueryHistory | None, now: datetime, settings: SearchSettings
 
 
 def _has_latest_fcr(name: str, known: Coverage, year: int) -> bool:
-    # Silver's names come from titles, so "Example Re" should match "Example Re Ltd."
-    key = dedupe_key(name)
-    return any(
-        year in years and (key in known_key or known_key in key) for known_key, years in known.institutions.items()
-    )
+    return any(year in years and same_institution(name, known_name) for known_name, years in known.institutions.items())
 
 
 def plan_queries(

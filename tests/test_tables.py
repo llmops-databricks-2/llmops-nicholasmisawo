@@ -3,9 +3,11 @@
 from fcr_curator.schemas import SILVER_METADATA_SCHEMA, SOURCE_SCHEMA
 from fcr_curator.tables import (
     bronze_merge_sql,
+    column_moves,
     delisted_ids,
     record_downloads_sql,
     record_embeddings_sql,
+    refresh_chunk_metadata_sql,
     silver_merge_sql,
 )
 
@@ -94,3 +96,44 @@ def test_record_embeddings_sets_only_the_embedding_by_chunk_id() -> None:
 
     assert "ON existing.id = embedded.id" in sql
     assert updated.strip().endswith("UPDATE SET existing.embedding = embedded.embedding")
+
+
+def test_chunk_metadata_refresh_updates_only_changed_chunks_from_silver() -> None:
+    """Chunks take silver's current metadata by document_id, and only when a value actually differs."""
+    sql = refresh_chunk_metadata_sql("chunks", "silver", ["institution", "registered_name"])
+    updated = _clause(sql, "MATCHED AND")
+
+    assert "ON existing.document_id = document.document_id" in sql
+    assert "NOT (existing.registered_name <=> document.registered_name)" in updated
+    assert "existing.institution = document.institution, existing.registered_name = document.registered_name" in updated
+
+
+def apply_moves(columns: list[str], moves: list[tuple[str, str | None]]) -> list[str]:
+    """Return columns after each move, as ALTER COLUMN ... FIRST / AFTER would leave them."""
+    result = list(columns)
+    for column, after in moves:
+        result.remove(column)
+        result.insert(0 if after is None else result.index(after) + 1, column)
+    return result
+
+
+def test_column_moves_put_a_late_added_column_where_the_schema_wants_it() -> None:
+    """A column appended at the end of a table moves to its place in the schema, here just after source."""
+    current = ["document_id", "source", "institution", "volume_path", "registered_name"]
+    wanted = ["document_id", "source", "registered_name", "institution", "volume_path"]
+
+    assert apply_moves(current, column_moves(current, wanted)) == wanted
+
+
+def test_column_moves_are_none_when_the_order_is_already_right() -> None:
+    """A table already in schema order is left alone."""
+    columns = ["document_id", "source", "registered_name"]
+
+    assert column_moves(columns, columns) == []
+
+
+def test_column_moves_leave_columns_outside_the_schema_after_the_others() -> None:
+    """A table column the schema doesn't name isn't dropped or moved into the middle."""
+    current = ["b", "a", "extra"]
+
+    assert apply_moves(current, column_moves(current, ["a", "b"])) == ["a", "b", "extra"]

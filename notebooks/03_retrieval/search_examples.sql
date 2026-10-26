@@ -16,12 +16,12 @@
 WITH question AS (
   SELECT ai_query('system.ai.gte-large-en', 'solvency ratio capital requirement') AS vector
 )
-SELECT institution, reporting_year, page_id + 1 AS page, left(text, 100) AS excerpt,
+SELECT coalesce(registered_name, institution) AS institution, reporting_year, page_id + 1 AS page, left(text, 100) AS excerpt,
        round(aggregate(zip_with(chunk.embedding, question.vector, (a, b) -> a * b), 0D, (total, x) -> total + x)
              / (sqrt(aggregate(chunk.embedding, 0D, (total, x) -> total + x * x))
                 * sqrt(aggregate(question.vector, 0D, (total, x) -> total + x * x))), 3) AS similarity
 FROM llmops_dev.nicholasmisawo.gold_fcr_chunks_by_section AS chunk CROSS JOIN question
-WHERE reporting_year = 2024 AND concat_ws(' ', institution, domain, title) ILIKE '%wilton%'
+WHERE reporting_year = 2024 AND concat_ws(' ', registered_name, institution, domain, title) ILIKE '%wilton%'
 ORDER BY similarity DESC LIMIT 5;
 
 
@@ -34,10 +34,10 @@ SELECT to_json(ai_query('system.ai.gte-large-en', 'solvency ratio capital requir
 -- 3. Keyword search with filters
 -- Where: Lakebase SQL editor, project lb-llmops-nicholasmisawo, branch production, database databricks_postgres.
 
-SELECT institution, reporting_year, page_id + 1 AS page, left(text, 100) AS excerpt,
+SELECT coalesce(registered_name, institution) AS institution, reporting_year, page_id + 1 AS page, left(text, 100) AS excerpt,
        round(ts_rank_cd(to_tsvector('english', text), words)::numeric, 3) AS rank
 FROM nicholasmisawo.fcr_chunks_dev, websearch_to_tsquery('english', 'solvency or ratio or capital or requirement') AS words
-WHERE reporting_year = 2024 AND concat_ws(' ', institution, domain, title) ILIKE '%wilton%'
+WHERE reporting_year = 2024 AND concat_ws(' ', registered_name, institution, domain, title) ILIKE '%wilton%'
   AND to_tsvector('english', text) @@ words
 ORDER BY rank DESC LIMIT 5;
 
@@ -47,7 +47,7 @@ ORDER BY rank DESC LIMIT 5;
 
 WITH filtered AS (
   SELECT * FROM nicholasmisawo.fcr_chunks_dev
-  WHERE reporting_year = 2024 AND concat_ws(' ', institution, domain, title) ILIKE '%wilton%'
+  WHERE reporting_year = 2024 AND concat_ws(' ', registered_name, institution, domain, title) ILIKE '%wilton%'
 ),
 semantic AS (
   SELECT id, row_number() OVER (ORDER BY embedding <=> '<PASTE VECTOR>'::vector) AS position
@@ -58,8 +58,8 @@ keyword AS (
   FROM filtered, websearch_to_tsquery('english', 'solvency or ratio or capital or requirement') AS words
   WHERE to_tsvector('english', text) @@ words ORDER BY position LIMIT 20
 )
-SELECT chunk.institution, chunk.reporting_year, chunk.page_id + 1 AS page, left(chunk.text, 100) AS excerpt,
+SELECT coalesce(chunk.registered_name, chunk.institution) AS institution, chunk.reporting_year, chunk.page_id + 1 AS page, left(chunk.text, 100) AS excerpt,
        round(sum(1.0 / (60 + ranked.position)), 4) AS rrf_score
 FROM (SELECT * FROM semantic UNION ALL SELECT * FROM keyword) AS ranked JOIN filtered AS chunk USING (id)
-GROUP BY chunk.id, chunk.institution, chunk.reporting_year, chunk.page_id, chunk.text
+GROUP BY chunk.id, chunk.registered_name, chunk.institution, chunk.reporting_year, chunk.page_id, chunk.text
 ORDER BY rrf_score DESC LIMIT 5;
