@@ -9,19 +9,18 @@ instead. fetch_fcr_documents asks the planned queries (see search_plan.py) and r
 Nothing is downloaded here, and whether a result really is an FCR is decided later, in curation.py.
 """
 
-import hashlib
 import time
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import NamedTuple
-from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from loguru import logger
 
 from fcr_curator.curation import classify_doc_kind
 from fcr_curator.search_plan import PlannedQuery
+from fcr_curator.urls import domain, normalize_url, url_document_id
 
 SERPAPI_SEARCH = "https://serpapi.com/search.json"
 SERPAPI_ACCOUNT = "https://serpapi.com/account.json"  # Free to call: doesn't use a search
@@ -55,20 +54,9 @@ class SearchRun(NamedTuple):
 # --- URLs -------------------------------------------------------------------------------------
 
 
-def normalize_url(url: str) -> str:
-    """Lower-case the scheme and host and drop any #fragment, so one file always has one URL."""
-    parts = urlsplit(url.strip())
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ""))
-
-
 def document_id(url: str) -> str:
     """Return a stable id for a result: 'serpapi_' plus a short hash of its URL."""
-    return f"{SOURCE}_{hashlib.sha256(normalize_url(url).encode()).hexdigest()[:16]}"
-
-
-def domain(url: str) -> str:
-    """Return the URL's host without a leading 'www.'."""
-    return urlsplit(url).netloc.lower().removeprefix("www.")
+    return url_document_id(url, SOURCE)
 
 
 # --- SerpAPI calls ----------------------------------------------------------------------------

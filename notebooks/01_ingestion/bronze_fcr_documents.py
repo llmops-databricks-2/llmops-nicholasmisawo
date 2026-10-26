@@ -1,13 +1,14 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Bronze: find FCR PDFs with SerpAPI
+# MAGIC # Bronze: find FCR PDFs with SerpAPI and from known disclosures pages
 # MAGIC
 # MAGIC 1. Plan the searches: only queries likely to find an FCR we don't have yet (`search_plan.py`)
 # MAGIC 2. Check the budget: searches left this month, minus a reserve, capped per run
 # MAGIC 3. Search, and log every search made
-# MAGIC 4. Merge the results into `bronze_fcr_documents`
+# MAGIC 4. Read the reference list's `fcr_pages` for their PDF links (`sources/pages.py`; costs no searches)
+# MAGIC 5. Merge everything found into `bronze_fcr_documents`
 # MAGIC
-# MAGIC Run the job with `--params dry_run=true` to stop after step 2 without using any searches.
+# MAGIC Run the job with `--params dry_run=true` to stop after step 2, changing nothing.
 
 # COMMAND ----------
 
@@ -18,8 +19,9 @@ from loguru import logger
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 
-from fcr_curator.config import load_config
+from fcr_curator.config import find_project_file, load_config
 from fcr_curator.http_client import create_session
+from fcr_curator.reference import REFERENCE_FILE, load_reference_entities
 from fcr_curator.schemas import BRONZE_SCHEMA, SEARCH_LOG_SCHEMA, SOURCE_SCHEMA
 from fcr_curator.search_plan import (
     SearchSettings,
@@ -29,7 +31,8 @@ from fcr_curator.search_plan import (
     search_budget,
     worst_case_searches,
 )
-from fcr_curator.sources.serpapi import fetch_fcr_documents, searches_left
+from fcr_curator.sources.pages import fetch_page_documents
+from fcr_curator.sources.serpapi import SearchRun, fetch_fcr_documents, searches_left
 from fcr_curator.tables import bronze_merge_sql, delist_sql, delisted_ids, ensure_table
 
 # COMMAND ----------
@@ -41,9 +44,12 @@ dbutils.widgets.text("dry_run", "false")
 cfg = load_config("../../project_config.yml", env=dbutils.widgets.get("env"))
 DRY_RUN = dbutils.widgets.get("dry_run").strip().lower() == "true"
 
+# (Re)insurers searched for by name, largest assets first (reference/bermuda_reinsurers.csv), each under
+# its current and previous names; a name is skipped once silver holds its FCR for the latest year
+REFERENCE_ENTITIES = load_reference_entities(find_project_file(REFERENCE_FILE))
 SETTINGS = SearchSettings(
     latest_year=date.today().year - 1,  # FCRs are published after the year ends
-    institutions=(),  # Insurers to search for by name, e.g. ("Arch Reinsurance Ltd.",)
+    institutions=tuple(name for entity in REFERENCE_ENTITIES for name in entity.names),
 )
 RUN_SEARCH_CAP = 150  # Weekly runs at this cap use at most ~650 of the 1,000 monthly searches
 SEARCH_RESERVE = 100  # Always left for manual and dev runs
@@ -53,7 +59,9 @@ SEARCH_LOG_TABLE = f"{cfg.full_schema_name}.bronze_fcr_search_log"
 SILVER_TABLE = f"{cfg.full_schema_name}.silver_fcr_documents"
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {cfg.full_schema_name}")
-ensure_table(spark, BRONZE_TABLE, BRONZE_SCHEMA, "bronze", "Bronze: every FCR search result SerpAPI has returned.")
+ensure_table(
+    spark, BRONZE_TABLE, BRONZE_SCHEMA, "bronze", "Bronze: every FCR PDF found by search or on a disclosures page."
+)
 ensure_table(spark, SEARCH_LOG_TABLE, SEARCH_LOG_SCHEMA, "bronze", "Bronze: one row per SerpAPI search made.")
 
 # COMMAND ----------
@@ -81,32 +89,44 @@ budget = search_budget(left, RUN_SEARCH_CAP, SEARCH_RESERVE)
 logger.info(f"Searches left this month: {left}; this run may use: {budget}")
 
 if DRY_RUN:
-    dbutils.notebook.exit(f"Dry run: {len(plan)} queries due, budget {budget}; nothing searched")
-if not plan or budget == 0:
-    dbutils.notebook.exit(f"Nothing searched: {len(plan)} queries due, budget {budget}")
+    pages = sum(len(entity.fcr_pages) for entity in REFERENCE_ENTITIES)
+    dbutils.notebook.exit(f"Dry run: {len(plan)} queries due, budget {budget}, {pages} pages to read; nothing changed")
 
 # COMMAND ----------
-# 3. Search, then log every search straight away so it's never repeated too soon
+# 3. Search (when anything is due and affordable), then log every search so it's never repeated too soon
 
-with create_session() as session:
-    run = fetch_fcr_documents(session, api_key, plan, max_searches=budget)
+run = SearchRun(documents=[], log=[], error=None)
+if plan and budget:
+    with create_session() as session:
+        run = fetch_fcr_documents(session, api_key, plan, max_searches=budget)
 
 if run.log:
     spark.createDataFrame(run.log, schema=SEARCH_LOG_SCHEMA).write.mode("append").saveAsTable(SEARCH_LOG_TABLE)
 logger.info(f"Used {len(run.log)} searches; found {len(run.documents)} distinct results")
 
 # COMMAND ----------
-# 4. Merge into bronze, then mark results that are no longer found (see tables.delisted_ids)
+# 4. Read the disclosures pages (every run: it costs no searches, and catches newly posted FCRs)
 
-if run.documents:
-    spark.createDataFrame(run.documents, schema=SOURCE_SCHEMA).createOrReplaceTempView("search_results")
-    spark.sql(bronze_merge_sql(BRONZE_TABLE, "search_results", SOURCE_SCHEMA.fieldNames())).show()
+with create_session() as session:
+    page_read = fetch_page_documents(session, REFERENCE_ENTITIES)
+logger.info(f"Pages read: {len(page_read.pages_read)}; PDF links found: {len(page_read.documents)}")
+for error in page_read.errors:
+    logger.warning(f"Page not read, will retry next run: {error}")
+
+# COMMAND ----------
+# 5. Merge into bronze, then mark results that are no longer found (see tables.delisted_ids). A page that
+# loaded counts as asked, so a PDF it no longer links is delisted like a search result no longer returned.
+
+found = [*run.documents, *page_read.documents]
+if found:
+    spark.createDataFrame(found, schema=SOURCE_SCHEMA).createOrReplaceTempView("found_documents")
+    spark.sql(bronze_merge_sql(BRONZE_TABLE, "found_documents", SOURCE_SCHEMA.fieldNames())).show()
 
 listed = spark.table(BRONZE_TABLE).where(col("is_listed")).select("document_id", "search_queries").collect()
 to_delist = delisted_ids(
     [row.asDict() for row in listed],
-    asked_queries={entry["query"] for entry in run.log},
-    returned_ids={document["document_id"] for document in run.documents},
+    asked_queries={entry["query"] for entry in run.log} | set(page_read.pages_read),
+    returned_ids={document["document_id"] for document in found},
 )
 if to_delist:
     spark.createDataFrame([(i,) for i in to_delist], "document_id string").createOrReplaceTempView("delisted")
