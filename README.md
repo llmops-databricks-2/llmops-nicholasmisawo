@@ -1,4 +1,4 @@
-# Financial Condition Report Curator
+#  Bermuda Financial Condition Report Curator
 
 **Databricks LLMOps | Bermuda Insurer Financial Condition Intelligence**
 
@@ -36,12 +36,12 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 
 **Data ingestion**
 - SerpAPI runs Google searches for FCR PDFs, generic per reporting year plus optional per-institution queries, and records every query that found each URL and its best rank.
-- Curation classifies each result (FCR, SFCR or other), extracts the institution and reporting year, and keeps one document per institution and year.
+- Curation classifies each result (FCR or other), extracts the institution and reporting year, and keeps one document per institution and year.
 - Delta tables store the document metadata.
 - Unity Catalog Volumes store the downloaded source PDFs.
 
 **Retrieval and analytics**
-- Document extraction with `ai_parse_document`, cleaning, chunking, and embeddings.
+- Document extraction with `ai_parse_document`, cleaning, and chunking. Chunks aren't embedded yet. When they are, note that SQL `ai_query` only reaches Databricks-provided `system.ai` model services, not the course's `course_ops.gateway.embed`; that service is reachable through the Unity Gateway embeddings API (`/ai-gateway/mlflow/v1/embeddings`).
 - Semantic retrieval over FCR text and tables.
 - SQL filtering by institution, domain, and reporting year.
 
@@ -85,10 +85,11 @@ The SerpAPI plan allows 1,000 searches a month. Every successful search counts, 
 | Priority | Query | Asked when | Pages |
 |---|---|---|---|
 | 1. `missing_year` | `site:<domain> "financial condition report" <year> filetype:pdf` | A domain in silver has an FCR, but not one for the latest reporting year | 1 |
-| 2. `institution` | `"<name>" "financial condition report" filetype:pdf` | A name in `INSTITUTIONS` has no FCR in silver for the latest year | 1 |
-| 3. `discovery` | Two generic templates per year in `DISCOVERY_YEARS` | Always, subject to the requery wait; the only way to find new domains | 2 |
+| 2. `institution` | `"<name>" "financial condition report" filetype:pdf` | A name in `SearchSettings.institutions` has no FCR in silver for the latest year | 1 |
+| 3. `discovery` | Three generic templates for each of the last `discovery_years` (3) reporting years: `"financial condition report" Bermuda`, the same with `"Bermuda Monetary Authority"`, and `"solvency and financial condition report" Bermuda` | Always, subject to the requery wait; the only way to find new domains | 2 |
 
-- **No repeat searches.** Every billed search is appended to `bronze_fcr_search_log`. A query isn't asked again for `REQUERY_AFTER_DAYS` (28), or `DEAD_QUERY_REQUERY_DAYS` (90) when its last run found nothing that looked like an FCR.
+- **No repeat searches.** Every billed search is appended to `bronze_fcr_search_log`. A query isn't asked again for `requery_after_days` (28), or `dead_query_requery_days` (90) when its last run found nothing that looked like an FCR. These are fields of `SearchSettings`, set in the bronze notebook's Settings cell.
+- **Targeted results.** Every search sends `gl=bm` (rank as if from Bermuda), `lr=lang_en` (English documents only) and `nfpr=1` (no auto-corrected queries); see `GOOGLE_PARAMS` in `sources/serpapi.py`. `cr=countryBM` and `tbs` date filters are left out on purpose: most FCRs are hosted outside Bermuda, and Google's PDF dates are unreliable.
 - **No wasted pages.** A second page is asked only when the first was full and held at least one FCR-like result.
 - **Hard caps.** Before searching, the run checks the account's searches left through SerpAPI's free Account API, then spends at most `min(RUN_SEARCH_CAP, searches left - SEARCH_RESERVE)`: 150 a run, keeping 100 back for manual and dev runs. Weekly runs at the cap spend at most about 650 a month. The account check sees usage from every environment and every manual run sharing the key; the search log is per environment.
 - **Dry run.** Run the job with `--params dry_run=true` to print the plan, its worst-case cost and the run's budget without searching (see [Validate, deploy, and run](#validate-deploy-and-run)).
@@ -99,7 +100,8 @@ The SerpAPI plan allows 1,000 searches a month. Every successful search counts, 
 **Silver** curates all of bronze with the rules in `src/fcr_curator/curation.py` and upserts the result into silver:
 
 - Keeps PDFs only: a `.pdf` URL, or one with no extension that a `filetype:pdf` query found.
-- Classifies each result as `fcr`, `sfcr` (the EU/UK Solvency and Financial Condition Report) or `other` from its title and filename, falling back to the snippet.
+- Drops anything hosted on `bma.bm` or a `.gov` site, including their subdomains (`EXCLUDED_DOMAINS` in `curation.py`). US government bodies such as the New York State Comptroller publish their own "Financial Condition Report". Discovery and institution queries also add `-site:bma.bm -site:gov`, so those pages don't take up paid result slots. The phrase "Bermuda Monetary Authority" in one discovery template is FCR text, not the website.
+- Classifies each result as `fcr` or `other`. In the Bermuda context "Financial Condition Report" and "Solvency and Financial Condition Report" (FCR / SFCR) are the same report, so either name in the title, filename or snippet makes it an `fcr`, on any domain (`.com` included). Searches are Bermuda-scoped, which is what keeps non-Bermuda reports out.
 - Extracts the reporting year, preferring a year beside the report's name (`FCR 2024`) over any other, so an upload date in a filename doesn't win. Years before 2016, when the disclosure rules took effect, and the current year, which can't have been reported on yet, are ignored.
 - Takes the institution from the title before the report's name, falling back to the site's name as Google gives it.
 - Keeps one document per institution and reporting year on each domain, preferring one search still returns and then the best-ranked, recording the dropped ids in `superseded_ids`.
@@ -116,14 +118,14 @@ Each download is checked for a PDF header; a file that isn't one (a landing or l
 | `bronze_fcr_search_log` | bronze | One row per billed SerpAPI search: query, reason, page, results and FCR-like results; append-only | Bronze task |
 | `silver_fcr_documents` | silver | Curated FCRs: PDFs only, classified, one per institution and year, filtered to `INCLUDED_DOC_KINDS` reporting on `MIN_REPORTING_YEAR` or later, plus `processed` and `volume_path` | Silver task |
 | `silver_parsed_fcr_documents` | silver | `ai_parse_document` output (as JSON) for each downloaded FCR, parsed once | Process task |
-| `gold_fcr_chunks` | gold | Cleaned text and table chunks with page, document metadata and embedding; Change Data Feed on for a Vector Search index | Process task |
+| `gold_fcr_chunks` | gold | Cleaned text and table chunks with page and document metadata, not yet embedded; Change Data Feed on for a Vector Search index | Process task |
 
 Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver` / `gold`), so its layer shows in Catalog Explorer. All are updated incrementally rather than overwritten, so runs are safe to repeat:
 
 - **Bronze** inserts new results and updates only rows whose content changed or that a new query found; `search_queries` keeps every query that ever found the row. A new run timestamp or a new `search_rank` alone is not a change, since Google reorders results between runs, so unchanged rows and their `first_seen_at` are left alone. A run asks only some queries, so a row is marked `is_listed = false` only when every one of its queries was asked again and none returned it; it flips back if it reappears.
 - **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Documents that no longer survive curation are removed from silver; any file already downloaded for them stays in the volume.
 - **Downloads**, when enabled, fetch only rows with no `volume_path` and skip files already in the volume.
-- **Processing** parses only downloaded documents not yet in `silver_parsed_fcr_documents` and chunks only parsed documents not yet in `gold_fcr_chunks`, so each FCR is parsed and embedded once. Parsed rows and chunks of documents silver no longer holds are deleted, so retrieval never answers from a superseded duplicate.
+- **Processing** parses only downloaded documents not yet in `silver_parsed_fcr_documents` and chunks only parsed documents not yet in `gold_fcr_chunks`, so each FCR is parsed and chunked once. Parsed rows and chunks of documents silver no longer holds are deleted, so retrieval never answers from a superseded duplicate.
 
 ### Bronze table schema: `bronze_fcr_documents`
 
@@ -152,7 +154,7 @@ Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silve
 | `institution` | string | Title before the report's name, else `site_name` |
 | `domain` | string | Result host without `www.` |
 | `title` | string | Normalized title |
-| `doc_kind` | string | `fcr`, `sfcr` or `other` |
+| `doc_kind` | string | `fcr` or `other` |
 | `file_type` | string | File extension, always `pdf` for now |
 | `file_url` | string | Result URL |
 | `reporting_year` | int | Year the FCR reports on, if found |
@@ -245,7 +247,7 @@ llmops-nicholasmisawo/
 │   └── fcr_curator/
 │       ├── config.py
 │       ├── curation.py        # rules that turn bronze results into silver FCRs
-│       ├── data_processor.py  # parse, chunk and embed downloaded FCRs
+│       ├── data_processor.py  # parse and chunk downloaded FCRs
 │       ├── download.py        # download curated FCRs into the volume
 │       ├── http_client.py     # retrying HTTP session and file download
 │       ├── schemas.py         # Spark schemas of the medallion tables
@@ -288,7 +290,7 @@ llmops-nicholasmisawo/
 
 - `src/fcr_curator/`: reusable Python package for configuration (including the assistant system prompt), sources, curation rules, downloads, table schemas and MERGEs, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `SOURCE_SCHEMA`.
 - `notebooks/01_ingestion/`: FCR discovery and curation pipelines.
-- `notebooks/02_processing/`: PDF parsing with `ai_parse_document`, chunk cleaning, and embedding (`data_processor.py`).
+- `notebooks/02_processing/`: PDF parsing with `ai_parse_document` and chunk cleaning (`data_processor.py`).
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
 - `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks: one scheduled pipeline job.
