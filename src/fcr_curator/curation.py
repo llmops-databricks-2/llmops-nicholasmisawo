@@ -1,11 +1,14 @@
-"""Rules for turning raw search results into curated Financial Condition Reports (FCRs).
+"""Rules that turn raw search results (bronze) into curated FCRs (silver).
 
-Search results are noisy: alongside Bermuda FCRs they return EU/UK Solvency and Financial Condition
-Reports (SFCRs), press releases and annual reports. These rules classify each result, extract the
-institution and reporting year, and keep one document per institution and year.
+Search results are noisy: next to Bermuda FCRs they include annual reports and press releases. In the
+Bermuda context a "Financial Condition Report" and a "Solvency and Financial Condition Report" are the
+same report, and every search is Bermuda-scoped, so both names count as an FCR. For each result these
+rules work out:
 
-Pure Python so the rules can be unit tested without Spark; the curation notebook applies them
-to the bronze table's rows.
+- what it is (doc_kind): fcr or other
+- whose report it is (institution) and which year it covers (reporting_year)
+
+then keep one document per institution and year. Plain Python, so it can be tested without Spark.
 """
 
 import re
@@ -14,41 +17,53 @@ from datetime import date
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
 
-# Checked in order: an SFCR title also contains "financial condition report"
-SFCR_PATTERN = re.compile(r"\bsolvency (?:and|&) financial condition report\b|\bsfcr\b")
-FCR_PATTERN = re.compile(r"\bfinancial condition report\b|\bfcr\b")
-# Every value classify_doc_kind can return
-DOC_KINDS = ("fcr", "sfcr", "other")
+DOC_KINDS = ("fcr", "other")
+# Either name of the report, or its abbreviation: FCR, SFCR, (Solvency and) Financial Condition Report
+FCR_NAME_PATTERN = re.compile(r"(?:\bsolvency (?:and|&) )?\bfinancial condition report\b|\bs?fcr\b", re.IGNORECASE)
 
-# Bermuda's public disclosure rules took effect for 2016 year-ends, so earlier years are noise
+# Bermuda's disclosure rules started with 2016 year-ends, so an earlier year is noise
 FIRST_REPORTING_YEAR = 2016
 YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
-# A year next to the report's name, e.g. "FCR 2024" or "2024 Financial Condition Report"
-FCR_YEAR_PATTERN = re.compile(
-    r"(?:financial condition report|\bfcr)\D{0,30}?\b(20\d{2})\b|\b(20\d{2})\b\D{0,30}?(?:financial condition report|fcr\b)"
+# A year right next to the report's name, e.g. "FCR 2024", "SFCR 2024" or "2024 Financial Condition Report"
+YEAR_BESIDE_NAME_PATTERN = re.compile(
+    r"(?:financial condition report|\bs?fcr)\D{0,30}?\b(20\d{2})\b|\b(20\d{2})\b\D{0,30}?(?:financial condition report|fcr\b)"
 )
-# Separators and filler left around an institution name once the report's name is cut from a title
-TITLE_FILLER = re.compile(r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+")
+# Leftovers around an institution's name once the report's name is cut out of a title
+TITLE_LEFTOVERS = re.compile(r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+")
+
+# Never curated, whatever search returns; subdomains are excluded too (cdn.bma.bm, osc.ny.gov)
+EXCLUDED_DOMAINS = (
+    "bma.bm",  # The regulator's site, not an insurer's
+    "gov",  # US government sites, e.g. the New York State Comptroller's own "Financial Condition Report"
+)
 
 DASHES = str.maketrans({"–": "-", "—": "-", "‒": "-", "−": "-"})
 QUOTES = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
 
 
+# --- Text helpers -----------------------------------------------------------------------------
+
+
+def normalize_title(title: str) -> str:
+    """Return the title with plain dashes and quotes, single spaces, and no '...' Google added."""
+    text = (title or "").translate(DASHES).translate(QUOTES)
+    text = re.sub(r"\s*(?:\.\.\.|…)$", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def dedupe_key(text: str) -> str:
+    """Return letters and digits only, lower-cased: 'Example Re, Ltd.' and 'example re ltd' match."""
+    return re.sub(r"[^a-z0-9]+", "", normalize_title(text).lower())
+
+
 def file_name(url: str) -> str:
-    """Return the decoded filename of a URL."""
+    """Return the decoded filename at the end of a URL."""
     return unquote(PurePosixPath(urlparse(url or "").path).name)
 
 
 def file_type(url: str) -> str:
-    """Return the file extension of a document URL without the dot, e.g. 'pdf' or 'xlsx'."""
+    """Return the URL's file extension, e.g. 'pdf'; '' if it has none."""
     return PurePosixPath(file_name(url)).suffix.lower().lstrip(".")
-
-
-def normalize_title(title: str) -> str:
-    """Normalize dashes, quotes and whitespace, and drop a trailing ellipsis Google adds to long titles."""
-    text = (title or "").translate(DASHES).translate(QUOTES)
-    text = re.sub(r"\s*(?:\.\.\.|…)$", "", text)
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def _readable_file_name(url: str) -> str:
@@ -56,61 +71,55 @@ def _readable_file_name(url: str) -> str:
     return re.sub(r"[-_.]+", " ", PurePosixPath(file_name(url)).stem).lower()
 
 
+def is_excluded_domain(domain: str | None) -> bool:
+    """Return True for an EXCLUDED_DOMAINS domain or any of its subdomains."""
+    host = (domain or "").lower()
+    return any(host == excluded or host.endswith(f".{excluded}") for excluded in EXCLUDED_DOMAINS)
+
+
+# --- What a result is -------------------------------------------------------------------------
+
+
 def classify_doc_kind(title: str, url: str, snippet: str | None = None) -> str:
-    """Classify a result from its title and filename, falling back to its snippet."""
-    for text in (f"{normalize_title(title)} {_readable_file_name(url)}".lower(), (snippet or "").lower()):
-        if SFCR_PATTERN.search(text):
-            return "sfcr"
-        if FCR_PATTERN.search(text):
-            return "fcr"
-    return "other"
-
-
-def _plausible(year: int, today: date) -> bool:
-    # An FCR is filed after its year ends, so the latest possible reporting year is last year
-    return FIRST_REPORTING_YEAR <= year < today.year
+    """Return fcr if the title, filename or snippet names the report, else other."""
+    text = f"{normalize_title(title)} {_readable_file_name(url)} {snippet or ''}"
+    return "fcr" if FCR_NAME_PATTERN.search(text) else "other"
 
 
 def reporting_year(title: str, url: str, snippet: str | None = None, today: date | None = None) -> int | None:
-    """Return the year an FCR reports on, or None when no plausible year is found.
+    """Return the year the report covers, or None.
 
-    Title, then filename, then snippet are searched in turn. A year next to the report's name wins
-    over any other year in the same text, since filenames often carry an upload date too.
+    Looks in the title, then the filename, then the snippet. A year next to the report's name beats
+    any other year, because filenames often carry an upload date too. Only years from 2016 to last year
+    count: an FCR is published after its year ends.
     """
-    today = today or date.today()
+    this_year = (today or date.today()).year
     for text in (normalize_title(title).lower(), _readable_file_name(url), (snippet or "").lower()):
-        beside_name = [int(a or b) for a, b in FCR_YEAR_PATTERN.findall(text)]
+        beside_name = [int(a or b) for a, b in YEAR_BESIDE_NAME_PATTERN.findall(text)]
         anywhere = [int(year) for year in YEAR_PATTERN.findall(text)]
-        for year in (*beside_name, *anywhere):
-            if _plausible(year, today):
+        for year in beside_name + anywhere:
+            if FIRST_REPORTING_YEAR <= year < this_year:
                 return year
     return None
 
 
 def institution(title: str, site_name: str | None = None) -> str | None:
-    """Return the institution an FCR belongs to: the title before the report's name, else the site's name."""
+    """Return whose report it is: the title before the report's name, else the website's name."""
     normalized = normalize_title(title)
-    match = re.search(r"(?:solvency (?:and|&) )?financial condition report|\bs?fcr\b", normalized, flags=re.IGNORECASE)
-    name = TITLE_FILLER.sub("", normalized[: match.start()]) if match else ""
+    match = FCR_NAME_PATTERN.search(normalized)
+    name = TITLE_LEFTOVERS.sub("", normalized[: match.start()]) if match else ""
     return name or site_name or None
 
 
-def dedupe_key(text: str) -> str:
-    """Key that treats names differing only in case, punctuation or spacing as the same."""
-    return re.sub(r"[^a-z0-9]+", "", normalize_title(text).lower())
-
-
-def _found_as_pdf(search_queries: Iterable[str]) -> bool:
-    # Google's filetype:pdf returns only PDFs, so such a result is one even when its URL has no extension
-    return any("filetype:pdf" in query for query in search_queries)
+# --- Curating ---------------------------------------------------------------------------------
 
 
 def curate_document(raw: dict, today: date | None = None) -> dict:
-    """Map one bronze row to its curated form (before filtering and deduplication)."""
-    url = raw.get("pdf_url")
-    title = raw["title"]
-    snippet = raw.get("snippet")
+    """Turn one bronze row into a silver row (before filtering and de-duplication)."""
+    url, title, snippet = raw.get("pdf_url"), raw["title"], raw.get("snippet")
     search_queries = list(raw.get("search_queries") or [])
+    # Google's filetype:pdf only returns PDFs, so trust it when the URL has no extension
+    found_as_pdf = any("filetype:pdf" in query for query in search_queries)
 
     return {
         "document_id": raw["document_id"],
@@ -119,7 +128,7 @@ def curate_document(raw: dict, today: date | None = None) -> dict:
         "domain": raw.get("domain"),
         "title": normalize_title(title),
         "doc_kind": classify_doc_kind(title, url, snippet),
-        "file_type": file_type(url) or ("pdf" if _found_as_pdf(search_queries) else ""),
+        "file_type": file_type(url) or ("pdf" if found_as_pdf else ""),
         "file_url": url,
         "reporting_year": reporting_year(title, url, snippet, today=today),
         "snippet": snippet,
@@ -132,64 +141,46 @@ def curate_document(raw: dict, today: date | None = None) -> dict:
     }
 
 
-def _survivor_order(document: dict) -> tuple:
-    # Still returned by search first, then the best-ranked result, then the earliest found
-    return (not document["is_listed"], document["search_rank"] or 999, document["first_seen_at"] or "")
-
-
 def deduplicate(documents: list[dict]) -> list[dict]:
-    """Keep one document per institution and reporting year on each domain.
+    """Keep one document per (domain, institution, reporting year).
 
-    The same FCR is often reachable at several URLs (a CDN copy, a re-upload). Documents with no
-    institution fall back to their title. The ids of the dropped duplicates are recorded on the
-    survivor's ``superseded_ids``.
+    The same FCR is often online at several URLs. The one kept is: still returned by search, then the
+    best-ranked, then the first found. The others' ids go in its superseded_ids.
     """
     groups: dict[tuple, list[dict]] = {}
     for doc in documents:
-        name = dedupe_key(doc["institution"] or doc["title"])
-        groups.setdefault((doc["domain"], name, doc["reporting_year"]), []).append(doc)
+        group_key = (doc["domain"], dedupe_key(doc["institution"] or doc["title"]), doc["reporting_year"])
+        groups.setdefault(group_key, []).append(doc)
 
-    survivors = []
+    kept = []
     for group in groups.values():
-        group.sort(key=_survivor_order)
-        survivor, *duplicates = group
-        survivor["superseded_ids"] = [d["document_id"] for d in duplicates]
-        survivors.append(survivor)
+        group.sort(key=lambda d: (not d["is_listed"], d["search_rank"] or 999, d["first_seen_at"] or ""))
+        best, *duplicates = group
+        best["superseded_ids"] = [d["document_id"] for d in duplicates]
+        kept.append(best)
 
-    return sorted(survivors, key=lambda d: (-(d["reporting_year"] or 0), d["institution"] or ""))
+    return sorted(kept, key=lambda d: (-(d["reporting_year"] or 0), d["institution"] or ""))
 
 
 def curate(raw_documents: list[dict], file_types: tuple[str, ...] = ("pdf",), today: date | None = None) -> list[dict]:
-    """Curate bronze rows: normalize, keep only the given file types, then deduplicate.
-
-    A URL with no extension counts as a PDF when a filetype:pdf query found it; the download checks
-    the file really is one.
-    """
+    """Curate every bronze row: keep PDFs not on an excluded domain, then de-duplicate."""
     curated = [curate_document(raw, today=today) for raw in raw_documents]
-    return deduplicate([doc for doc in curated if doc["file_type"] in file_types])
+    return deduplicate([d for d in curated if d["file_type"] in file_types and not is_excluded_domain(d["domain"])])
+
+
+# --- Filters for silver -----------------------------------------------------------------------
 
 
 def keep_doc_kinds(documents: Iterable[dict], doc_kinds: Iterable[str]) -> list[dict]:
-    """Return the documents whose ``doc_kind`` is one of doc_kinds, in their original order.
-
-    Raises ValueError for an empty set (it would empty silver) or an unknown kind (a typo would
-    silently drop that kind's documents).
-    """
-    kept = set(doc_kinds)
-    if not kept:
-        raise ValueError(f"No doc_kinds to keep; choose from {list(DOC_KINDS)}")
-    unknown = kept - set(DOC_KINDS)
-    if unknown:
-        raise ValueError(f"Unknown doc_kind(s) {sorted(unknown)}; choose from {list(DOC_KINDS)}")
-    return [document for document in documents if document["doc_kind"] in kept]
+    """Keep documents of the given kinds. An empty or misspelt kind is an error, not an empty silver."""
+    kinds = set(doc_kinds)
+    if not kinds or not kinds <= set(DOC_KINDS):
+        raise ValueError(f"doc_kinds must be a non-empty subset of {list(DOC_KINDS)}, got {sorted(kinds)}")
+    return [d for d in documents if d["doc_kind"] in kinds]
 
 
 def keep_reported_since(documents: Iterable[dict], min_year: int | None) -> list[dict]:
-    """Return the documents reporting on min_year or later, in their original order.
-
-    None keeps every document. Otherwise documents with no ``reporting_year`` are left out, since
-    there's no telling whether they meet the cutoff.
-    """
+    """Keep documents reporting on min_year or later (undated ones are dropped). None keeps all."""
     if min_year is None:
         return list(documents)
-    return [document for document in documents if document["reporting_year"] and document["reporting_year"] >= min_year]
+    return [d for d in documents if d["reporting_year"] and d["reporting_year"] >= min_year]

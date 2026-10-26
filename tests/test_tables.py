@@ -1,7 +1,7 @@
 """Tests for the incremental MERGE statements that update the bronze and silver tables."""
 
 from fcr_curator.schemas import SILVER_METADATA_SCHEMA, SOURCE_SCHEMA
-from fcr_curator.tables import bronze_merge_sql, delisted_ids, silver_merge_sql
+from fcr_curator.tables import bronze_merge_sql, delisted_ids, record_downloads_sql, silver_merge_sql
 
 SOURCE_COLUMNS = SOURCE_SCHEMA.fieldNames()
 SILVER_COLUMNS = SILVER_METADATA_SCHEMA.fieldNames()
@@ -70,3 +70,12 @@ def test_silver_merge_never_overwrites_download_storage() -> None:
 
     assert "processed" not in updated and "volume_path" not in updated
     assert inserted.rstrip().endswith("NULL, NULL)")
+
+
+def test_record_downloads_sets_only_the_storage_columns() -> None:
+    """Recording downloads touches processed and volume_path and nothing else."""
+    updated = _clause(record_downloads_sql("silver", "downloads"), "MATCHED THEN")
+
+    assert "existing.processed = downloaded.processed" in updated
+    assert "existing.volume_path = downloaded.volume_path" in updated
+    assert updated.count(" = ") == 2

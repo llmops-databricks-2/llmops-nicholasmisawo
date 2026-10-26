@@ -1,40 +1,47 @@
-"""Plan which SerpAPI searches a run spends its budget on.
+"""Decide which SerpAPI searches a bronze run makes.
 
-Searches are the scarce resource: the plan allows a fixed number a month, and a page with no results
-still counts as one. So each run asks only the queries likely to find an FCR PDF silver doesn't hold
-yet, most promising first:
+The plan allows 1,000 searches a month, and even an empty results page costs one, so every run asks
+only the queries most likely to find an FCR PDF we don't have yet. In priority order:
 
-1. ``missing_year``: a site: query for each domain that has published an FCR before but not one for
-   the latest reporting year. One page, and the hit rate is high because the domain is known.
-2. ``institution``: a query for each named institution with no FCR for the latest reporting year.
-3. ``discovery``: generic per-year queries, the only ones that find domains not seen before.
+1. missing_year  - site: query for a domain that has an FCR in silver, but not for the latest year
+2. institution   - query for an insurer you named that has no FCR for the latest year
+3. discovery     - generic queries per reporting year; the only way to find new websites
 
-A query isn't asked again until REQUERY_AFTER_DAYS have passed since it last ran, or
-DEAD_QUERY_REQUERY_DAYS when that run found nothing that looked like an FCR. The plan isn't cut to a
-budget here: fetch_fcr_documents stops at the run's search cap, so the most promising queries run first.
+A query that ran recently is skipped: for 28 days, or 90 days if it found nothing FCR-like last time.
 """
 
+from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from fcr_curator.curation import dedupe_key
+from fcr_curator.curation import EXCLUDED_DOMAINS, dedupe_key
 
-REQUERY_AFTER_DAYS = 28
-DEAD_QUERY_REQUERY_DAYS = 90
+# Added to open-ended queries so pages from excluded sites don't use up paid result slots
+EXCLUDED_SITES = " ".join(f"-site:{domain}" for domain in EXCLUDED_DOMAINS)
 
-# Generic queries, asked once per reporting year
+# Some Bermuda insurers call their FCR a "Solvency and Financial Condition Report", so both names are searched
 DISCOVERY_TEMPLATES = (
-    '"financial condition report" Bermuda {year} filetype:pdf',
-    '"financial condition report" "Bermuda Monetary Authority" {year} filetype:pdf',
+    f'"financial condition report" Bermuda {{year}} filetype:pdf {EXCLUDED_SITES}',
+    f'"financial condition report" "Bermuda Monetary Authority" {{year}} filetype:pdf {EXCLUDED_SITES}',
+    f'"solvency and financial condition report" Bermuda {{year}} filetype:pdf {EXCLUDED_SITES}',
 )
-DISCOVERY_PAGES = 2
-TARGETED_PAGES = 1  # A known domain or a named institution rarely needs a second page
+
+
+@dataclass(frozen=True)
+class SearchSettings:
+    """What a run looks for, and how long it waits before repeating a query."""
+
+    latest_year: int  # Newest reporting year to look for
+    institutions: tuple[str, ...] = ()  # Insurers to search for by name
+    discovery_years: int = 3  # Reporting years the generic queries cover, counting back from latest_year
+    requery_after_days: int = 28
+    dead_query_requery_days: int = 90  # For a query whose last run found nothing FCR-like
 
 
 @dataclass(frozen=True)
 class PlannedQuery:
-    """One query a run may ask, why it's asked, and the most pages it may cost."""
+    """One query to ask, why, and the most result pages it may use."""
 
     query: str
     reason: str  # missing_year, institution or discovery
@@ -43,7 +50,7 @@ class PlannedQuery:
 
 @dataclass(frozen=True)
 class QueryHistory:
-    """When a query last ran, and how many FCR-looking results that run found across its pages."""
+    """When a query last ran, and how many FCR-like results that run found."""
 
     last_searched_at: datetime
     fcr_results: int
@@ -51,109 +58,123 @@ class QueryHistory:
 
 @dataclass(frozen=True)
 class Coverage:
-    """Reporting years silver already holds an FCR for, by domain and by institution name key."""
+    """Reporting years silver already has an FCR for, by domain and by institution."""
 
     domains: Mapping[str, set[int]]
-    institutions: Mapping[str, set[int]]
+    institutions: Mapping[str, set[int]]  # Keyed by dedupe_key(institution)
+
+
+# --- Query text -------------------------------------------------------------------------------
 
 
 def site_query(domain: str, year: int) -> str:
-    """Query one domain for its FCR for one reporting year."""
+    """Query one website for its FCR for one year."""
     return f'site:{domain} "financial condition report" {year} filetype:pdf'
 
 
 def institution_query(name: str) -> str:
-    """Query one institution's FCRs by name."""
-    return f'"{name}" "financial condition report" filetype:pdf'
+    """Query one insurer's FCRs by name."""
+    return f'"{name}" "financial condition report" filetype:pdf {EXCLUDED_SITES}'
+
+
+# --- What we already have ---------------------------------------------------------------------
 
 
 def coverage(silver_rows: Iterable[dict]) -> Coverage:
-    """Collect the reporting years silver holds per domain and per institution."""
-    domains: dict[str, set[int]] = {}
-    institutions: dict[str, set[int]] = {}
+    """Collect which reporting years silver holds, per domain and per institution."""
+    domains: dict[str, set[int]] = defaultdict(set)
+    institutions: dict[str, set[int]] = defaultdict(set)
     for row in silver_rows:
         year = row.get("reporting_year")
         if not year:
             continue
         if row.get("domain"):
-            domains.setdefault(row["domain"], set()).add(year)
+            domains[row["domain"]].add(year)
         if row.get("institution"):
-            institutions.setdefault(dedupe_key(row["institution"]), set()).add(year)
-    return Coverage(domains, institutions)
+            institutions[dedupe_key(row["institution"])].add(year)
+    return Coverage(dict(domains), dict(institutions))
 
 
 def query_history(log_rows: Iterable[dict]) -> dict[str, QueryHistory]:
-    """Summarise the search log: each query's latest run and the FCR-looking results it found.
+    """Summarise the search log into each query's latest run.
 
-    A run spans several log rows (one per page), all sharing its ``searched_at``.
+    One run of a query can span several log rows (one per page); they share a searched_at, so their
+    FCR-like results are added up.
     """
-    latest: dict[str, tuple[str, int]] = {}
-    for row in log_rows:
-        query, searched_at, found = row["query"], row["searched_at"], row["fcr_results"] or 0
-        previous = latest.get(query)
-        if previous is None or searched_at > previous[0]:
-            latest[query] = (searched_at, found)
-        elif searched_at == previous[0]:
-            latest[query] = (searched_at, previous[1] + found)
-    return {query: QueryHistory(datetime.fromisoformat(at), found) for query, (at, found) in latest.items()}
+    rows = list(log_rows)
+    latest = {}
+    for row in rows:
+        latest[row["query"]] = max(latest.get(row["query"], ""), row["searched_at"])
+
+    found: dict[str, int] = defaultdict(int)
+    for row in rows:
+        if row["searched_at"] == latest[row["query"]]:
+            found[row["query"]] += row["fcr_results"] or 0
+
+    return {query: QueryHistory(datetime.fromisoformat(at), found[query]) for query, at in latest.items()}
 
 
-def is_due(
-    history: QueryHistory | None,
-    now: datetime,
-    requery_after_days: int = REQUERY_AFTER_DAYS,
-    dead_query_requery_days: int = DEAD_QUERY_REQUERY_DAYS,
-) -> bool:
-    """Return whether a query should be asked again: never asked, or its wait has passed."""
+# --- The plan ---------------------------------------------------------------------------------
+
+
+def is_due(history: QueryHistory | None, now: datetime, settings: SearchSettings) -> bool:
+    """Return True if a query never ran, or its waiting period has passed."""
     if history is None:
         return True
-    wait = dead_query_requery_days if history.fcr_results == 0 else requery_after_days
+    wait = settings.dead_query_requery_days if history.fcr_results == 0 else settings.requery_after_days
     return now - history.last_searched_at >= timedelta(days=wait)
 
 
-def _institution_covered(name: str, covered: Mapping[str, set[int]], year: int) -> bool:
-    # Silver's institution comes from a title, so "Example Re" should match "Example Re Ltd."
+def _has_latest_fcr(name: str, known: Coverage, year: int) -> bool:
+    # Silver's names come from titles, so "Example Re" should match "Example Re Ltd."
     key = dedupe_key(name)
-    return any(year in years and (key in silver_key or silver_key in key) for silver_key, years in covered.items())
+    return any(
+        year in years and (key in known_key or known_key in key) for known_key, years in known.institutions.items()
+    )
 
 
 def plan_queries(
-    latest_year: int,
-    discovery_years: Iterable[int],
-    institutions: Iterable[str],
-    known: Coverage,
-    history: Mapping[str, QueryHistory],
-    now: datetime,
-    requery_after_days: int = REQUERY_AFTER_DAYS,
-    dead_query_requery_days: int = DEAD_QUERY_REQUERY_DAYS,
+    settings: SearchSettings, known: Coverage, history: Mapping[str, QueryHistory], now: datetime
 ) -> list[PlannedQuery]:
-    """Return the queries due this run, most likely to find a new FCR PDF first, without duplicates."""
+    """Return the queries due this run, most promising first.
+
+    The plan isn't trimmed to a budget here; the search stops when the run's budget is spent, so the
+    most promising queries are the ones that get asked.
+    """
+    year = settings.latest_year
+    discovery_years = range(year, year - settings.discovery_years, -1)  # Newest first
+
     candidates = [
         *(
-            PlannedQuery(site_query(domain, latest_year), "missing_year", TARGETED_PAGES)
+            PlannedQuery(site_query(domain, year), "missing_year", max_pages=1)
             for domain, years in sorted(known.domains.items())
-            if latest_year not in years
+            if year not in years
         ),
         *(
-            PlannedQuery(institution_query(name), "institution", TARGETED_PAGES)
-            for name in institutions
-            if not _institution_covered(name, known.institutions, latest_year)
+            PlannedQuery(institution_query(name), "institution", max_pages=1)
+            for name in settings.institutions
+            if not _has_latest_fcr(name, known, year)
         ),
         *(
-            PlannedQuery(template.format(year=year), "discovery", DISCOVERY_PAGES)
-            for year in sorted(discovery_years, reverse=True)
+            PlannedQuery(template.format(year=discovery_year), "discovery", max_pages=2)
+            for discovery_year in discovery_years
             for template in DISCOVERY_TEMPLATES
         ),
     ]
 
-    planned: dict[str, PlannedQuery] = {}
-    for candidate in candidates:
-        due = is_due(history.get(candidate.query), now, requery_after_days, dead_query_requery_days)
-        if due and candidate.query not in planned:
-            planned[candidate.query] = candidate
-    return list(planned.values())
+    plan, seen = [], set()
+    for planned in candidates:
+        if planned.query not in seen and is_due(history.get(planned.query), now, settings):
+            seen.add(planned.query)
+            plan.append(planned)
+    return plan
 
 
 def worst_case_searches(plan: Iterable[PlannedQuery]) -> int:
-    """Return the most searches a plan can cost, if every page it may ask for comes back full."""
-    return sum(query.max_pages for query in plan)
+    """Return the most searches a plan can use: every page it's allowed."""
+    return sum(planned.max_pages for planned in plan)
+
+
+def search_budget(searches_left: int, run_cap: int, reserve: int) -> int:
+    """Return the searches this run may use: at most run_cap, never dipping into the reserve."""
+    return max(0, min(run_cap, searches_left - reserve))

@@ -10,5 +10,5 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def serpapi_page() -> dict:
-    """Return a SerpAPI Google response: an FCR, an SFCR, and a result with no link."""
+    """Return a SerpAPI Google response: a Financial Condition Report, an SFCR, and a result with no link."""
     return json.loads((FIXTURES / "serpapi_google.json").read_text())

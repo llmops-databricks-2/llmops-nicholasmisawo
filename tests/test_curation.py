@@ -57,13 +57,14 @@ def test_normalize_title_drops_google_ellipsis_and_fixes_dashes() -> None:
     [
         ("Example Re Ltd. Financial Condition Report 2024", "https://x.com/a.pdf", None, "fcr"),
         ("Document", "https://x.com/FCR_2024_final.pdf", None, "fcr"),
-        ("Example SE Solvency and Financial Condition Report 2024", "https://x.com/a.pdf", None, "sfcr"),
+        ("Example Re Ltd. Solvency and Financial Condition Report 2024", "https://example-re.com/a.pdf", None, "fcr"),
+        ("Document", "https://example-re.com/SFCR_2024.pdf", None, "fcr"),
         ("Example Re", "https://x.com/report.pdf", "The Financial Condition Report sets out", "fcr"),
         ("Annual Report 2024", "https://x.com/annual.pdf", "Results for the year", "other"),
     ],
 )
 def test_classify_doc_kind(title: str, url: str, snippet: str | None, expected: str) -> None:
-    """Title and filename decide the kind, the snippet is the fallback, and an SFCR is never an FCR."""
+    """Either name of the report, or its abbreviation, in the title, filename or snippet makes it an FCR, on any domain."""
     assert classify_doc_kind(title, url, snippet) == expected
 
 
@@ -121,6 +122,23 @@ def test_curate_treats_an_extensionless_url_from_a_filetype_pdf_query_as_a_pdf()
     assert document["file_type"] == "pdf"
 
 
+@pytest.mark.parametrize("domain", ["bma.bm", "cdn.bma.bm", "osc.ny.gov"])
+def test_curate_drops_results_from_excluded_domains_and_their_subdomains(domain: str) -> None:
+    """Nothing on bma.bm or a .gov site is curated, however FCR-like it looks."""
+    documents = curate([raw("a", "Example Re Ltd. FCR 2024", f"https://{domain}/a.pdf", domain=domain)], today=TODAY)
+
+    assert documents == []
+
+
+def test_curate_keeps_domains_that_only_end_in_the_same_letters() -> None:
+    """Only bma.bm and its subdomains are excluded, not a domain like notbma.bm."""
+    documents = curate(
+        [raw("a", "Example Re Ltd. FCR 2024", "https://notbma.bm/a.pdf", domain="notbma.bm")], today=TODAY
+    )
+
+    assert [document["document_id"] for document in documents] == ["a"]
+
+
 def test_curate_keeps_one_fcr_per_institution_and_year_preferring_the_best_rank() -> None:
     """The same FCR at two URLs on one domain is one document, the better-ranked one recording the other."""
     documents = curate(
@@ -166,9 +184,9 @@ def test_keep_doc_kinds_filters_and_rejects_unknown_kinds() -> None:
     documents = [{"doc_kind": kind} for kind in DOC_KINDS]
 
     assert keep_doc_kinds(documents, {"fcr"}) == [{"doc_kind": "fcr"}]
-    with pytest.raises(ValueError, match="Unknown"):
+    with pytest.raises(ValueError, match="non-empty subset"):
         keep_doc_kinds(documents, {"fcrs"})
-    with pytest.raises(ValueError, match="No doc_kinds"):
+    with pytest.raises(ValueError, match="non-empty subset"):
         keep_doc_kinds(documents, set())
 
 

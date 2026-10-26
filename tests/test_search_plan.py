@@ -5,22 +5,26 @@ from datetime import UTC, datetime, timedelta
 from fcr_curator.search_plan import (
     Coverage,
     QueryHistory,
+    SearchSettings,
     coverage,
     institution_query,
     is_due,
     plan_queries,
     query_history,
+    search_budget,
     site_query,
     worst_case_searches,
 )
 
 NOW = datetime(2026, 10, 26, tzinfo=UTC)
 NOTHING_KNOWN = Coverage({}, {})
+SETTINGS = SearchSettings(latest_year=2025, discovery_years=2)
 
 
 def plan(known: Coverage = NOTHING_KNOWN, institutions: tuple[str, ...] = (), history: dict | None = None) -> list:
-    """Plan for latest year 2025 with discovery over 2024 and 2025."""
-    return plan_queries(2025, [2024, 2025], institutions, known, history or {}, now=NOW)
+    """Plan for latest year 2025, with discovery over 2025 and 2024."""
+    settings = SearchSettings(latest_year=2025, institutions=institutions, discovery_years=2)
+    return plan_queries(settings, known, history or {}, now=NOW)
 
 
 def test_plan_asks_known_domains_missing_the_latest_year_first() -> None:
@@ -49,7 +53,7 @@ def test_plan_runs_discovery_newest_year_first_and_last() -> None:
     planned = plan(Coverage({"example-re.com": {2024}}, {}))
 
     reasons = [query.reason for query in planned]
-    assert reasons == ["missing_year"] + ["discovery"] * 4
+    assert reasons == ["missing_year"] + ["discovery"] * 6
     assert "2025" in planned[1].query
 
 
@@ -65,9 +69,9 @@ def test_is_due_waits_longer_for_a_query_that_found_nothing() -> None:
     """A query whose last run found no FCRs waits the longer dead-query window."""
     forty_days_ago = NOW - timedelta(days=40)
 
-    assert is_due(QueryHistory(forty_days_ago, fcr_results=2), NOW)
-    assert not is_due(QueryHistory(forty_days_ago, fcr_results=0), NOW)
-    assert is_due(None, NOW)
+    assert is_due(QueryHistory(forty_days_ago, fcr_results=2), NOW, SETTINGS)
+    assert not is_due(QueryHistory(forty_days_ago, fcr_results=0), NOW, SETTINGS)
+    assert is_due(None, NOW, SETTINGS)
 
 
 def test_query_history_sums_the_pages_of_each_querys_latest_run() -> None:
@@ -96,4 +100,27 @@ def test_coverage_collects_years_by_domain_and_institution() -> None:
 
 def test_worst_case_searches_counts_every_page_a_plan_may_ask_for() -> None:
     """The dry-run cost is the sum of each query's page allowance."""
-    assert worst_case_searches(plan(Coverage({"example-re.com": {2024}}, {}))) == 1 + 4 * 2
+    assert worst_case_searches(plan(Coverage({"example-re.com": {2024}}, {}))) == 1 + 6 * 2
+
+
+def test_open_ended_queries_exclude_the_bma_website() -> None:
+    """Discovery and institution queries leave out bma.bm and .gov sites, so they don't use paid slots."""
+    queries = [query.query for query in plan(institutions=("Example Re",))]
+
+    assert queries
+    assert all(query.endswith("-site:bma.bm -site:gov") for query in queries)
+
+
+def test_search_budget_never_exceeds_the_run_cap_or_touches_the_reserve() -> None:
+    """A run spends at most its cap, keeps the reserve untouched, and never goes negative."""
+    assert search_budget(searches_left=900, run_cap=150, reserve=100) == 150
+    assert search_budget(searches_left=180, run_cap=150, reserve=100) == 80
+    assert search_budget(searches_left=50, run_cap=150, reserve=100) == 0
+
+
+def test_discovery_searches_both_names_bermuda_insurers_use() -> None:
+    """Each discovery year asks for "financial condition report" and "solvency and financial condition report"."""
+    queries = [query.query for query in plan() if "2025" in query.query]
+
+    assert any(query.startswith('"financial condition report"') for query in queries)
+    assert any(query.startswith('"solvency and financial condition report"') for query in queries)

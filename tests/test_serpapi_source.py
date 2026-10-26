@@ -88,6 +88,18 @@ def test_search_page_treats_google_finding_nothing_as_an_empty_page() -> None:
     assert search_page(session, "key", "q") == []
 
 
+def test_search_page_keeps_results_english_bermuda_ranked_and_uncorrected() -> None:
+    """Every search asks for English documents, ranked as if from Bermuda, for the exact query given."""
+    session = FakeSession(FakeResponse({"organic_results": []}))
+
+    search_page(session, "key", "q", start=10)
+
+    [params] = session.requests
+    assert (params["q"], params["start"]) == ("q", 10)
+    assert (params["gl"], params["lr"], params["nfpr"]) == ("bm", "lang_en", 1)
+    assert "cr" not in params and "tbs" not in params
+
+
 @pytest.mark.parametrize(
     "response",
     [FakeResponse({"error": "Invalid API key."}, 401), FakeResponse(None, 503)],
@@ -160,7 +172,7 @@ def test_fetch_logs_each_search_with_its_fcr_like_results(serpapi_page: dict) ->
 
     [entry] = run.log
     assert (entry["query"], entry["reason"], entry["page_start"]) == ("q", "discovery", 0)
-    assert (entry["results"], entry["fcr_results"]) == (2, 1)
+    assert (entry["results"], entry["fcr_results"]) == (2, 2)
 
 
 def test_fetch_keeps_earlier_results_when_a_later_search_fails(serpapi_page: dict) -> None:
