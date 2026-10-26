@@ -41,7 +41,9 @@ The assistant combines RAG-based document retrieval with SQL over document metad
 - Unity Catalog Volumes store the downloaded source PDFs.
 
 **Retrieval and analytics**
-- Document extraction with `ai_parse_document`, cleaning, and chunking. Chunks aren't embedded yet. When they are, note that SQL `ai_query` only reaches Databricks-provided `system.ai` model services, not the course's `course_ops.gateway.embed`; that service is reachable through the Unity Gateway embeddings API (`/ai-gateway/mlflow/v1/embeddings`).
+- Document extraction with `ai_parse_document`, cleaning, and chunking with two strategies, compared side by side.
+- Embeddings for the section chunks through the Unity Gateway embeddings API (`/ai-gateway/mlflow/v1/embeddings`, `embeddings.py`): SQL `ai_query` only reaches Databricks-provided `system.ai` model services, not the course's `course_ops.gateway.embed`.
+- A Lakebase synced table copies the embedded chunks into Postgres, with the embedding as a pgvector `vector(1024)` column, for semantic and hybrid search.
 - Semantic retrieval over FCR text and tables.
 - SQL filtering by institution, domain, and reporting year.
 
@@ -59,7 +61,8 @@ One job, `fcr_pipeline-<target>`, runs the stages in order; each task starts onl
 |---|---|---|---|
 | `bronze_fcr_documents` | `01_ingestion/bronze_fcr_documents.py` | `bronze_fcr_documents` | — |
 | `silver_fcr_documents` | `01_ingestion/silver_fcr_documents.py` | `silver_fcr_documents` | `fcr_documents/<source>/` (only when `DOWNLOAD_FILES = True`) |
-| `process_fcr_documents` | `02_processing/process_fcr_documents.py` | `silver_parsed_fcr_documents`, `gold_fcr_chunks`, `gold_fcr_chunks_by_section` | — (reads the silver downloads) |
+| `process_fcr_documents` | `02_processing/process_fcr_documents.py` | `silver_parsed_fcr_documents`, `gold_fcr_chunks`, `gold_fcr_chunks_by_section` (with embeddings) | — (reads the silver downloads) |
+| `sync_fcr_chunks_to_lakebase` | `03_retrieval/sync_fcr_chunks_to_lakebase.py` | `fcr_chunks_<target>` (Lakebase synced table) | — |
 
 The job runs weekly, Mondays at 06:00 Bermuda time (`Atlantic/Bermuda`). The schedule is paused in `dev` and `acc` and active in `prd`, set by the `schedule_pause_status` bundle variable in `databricks.yml`; the usage policy comes from the `usage_policy_id` variable. Run it by hand with:
 
@@ -119,7 +122,8 @@ Each download is checked for a PDF header; a file that isn't one (a landing or l
 | `silver_fcr_documents` | silver | Curated FCRs: PDFs only, classified, one per institution and year, filtered to `INCLUDED_DOC_KINDS` reporting on `MIN_REPORTING_YEAR` or later, plus `processed` and `volume_path` | Silver task |
 | `silver_parsed_fcr_documents` | silver | `ai_parse_document` output (as JSON) for each downloaded FCR, parsed once | Process task |
 | `gold_fcr_chunks` | gold | Chunking strategy 1: one chunk per parsed text or table element, with page and document metadata; not yet embedded; Change Data Feed on | Process task |
-| `gold_fcr_chunks_by_section` | gold | Chunking strategy 2: one chunk per section (like Unstructured's `by_title`), each starting with its heading, up to 2,000 characters; tables split by rows; not yet embedded; Change Data Feed on | Process task |
+| `gold_fcr_chunks_by_section` | gold | Chunking strategy 2, the one kept for search: one chunk per section (like Unstructured's `by_title`), each starting with its heading, up to 2,000 characters; tables split by rows; plus a 1,024-dimension `embedding`; Change Data Feed on | Process task |
+| `fcr_chunks_<target>` | synced | Lakebase copy of `gold_fcr_chunks_by_section` in Postgres table `<schema>.fcr_chunks_<target>`: primary key `id`, `embedding` as `vector(1024)`; refreshed by every pipeline run | Sync task |
 
 Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver` / `gold`), so its layer shows in Catalog Explorer. All are updated incrementally rather than overwritten, so runs are safe to repeat:
 
@@ -227,7 +231,21 @@ The `lakebase_instance` in `project_config.yml` identifies the provisioned Lakeb
 
 Unity Catalog schemas remain environment-specific.
 
-The course does not automatically create an application database or install `pgvector`. These resources must be configured during the relevant lecture.
+### The synced chunk table
+
+The `sync_fcr_chunks_to_lakebase` task (`src/fcr_curator/lakebase.py`) keeps a Lakebase synced table of `gold_fcr_chunks_by_section`:
+
+- **Name**: `<catalog>.<schema>.fcr_chunks_<target>` in Unity Catalog, and Postgres table `<schema>.fcr_chunks_<target>` in database `databricks_postgres`. Every environment shares the one Lakebase database, so the target is part of the name.
+- **Columns**: every chunk column, keyed by `id`, with `embedding` overridden to pgvector `vector(1024)` so Postgres can search it directly.
+- **Scheduling**: `TRIGGERED`. The first run creates the synced table and copies every row; later runs refresh it, copying only what changed through the source's Change Data Feed, and wait for the refresh to finish. A failed sync fails the task.
+
+**One-time setup, already done**: the `vector` column needs the pgvector extension in the database. Install it once from your machine (every environment shares the database):
+
+```bash
+uv run python -c "from databricks.sdk import WorkspaceClient; from fcr_curator.config import load_config; from fcr_curator.lakebase import ensure_vector_extension; ensure_vector_extension(WorkspaceClient(profile='<profile>'), load_config('project_config.yml'))"
+```
+
+The job never connects to Postgres itself: loading `psycopg`'s compiled library aborts the Python process on serverless job compute, so `lakebase.py` imports it only inside `connect()`, which the sync never calls.
 
 Lakebase supports PostgreSQL-based vector storage. Databricks managed Vector Search would instead need its own endpoint and index.
 
@@ -249,9 +267,11 @@ llmops-nicholasmisawo/
 │       ├── config.py
 │       ├── curation.py        # rules that turn bronze results into silver FCRs
 │       ├── chunking.py        # the two chunking strategies: per element and per section
-│       ├── data_processor.py  # parse downloaded FCRs and chunk them with every strategy
+│       ├── data_processor.py  # parse, chunk with every strategy, embed the search chunks
 │       ├── download.py        # download curated FCRs into the volume
+│       ├── embeddings.py      # embed chunks through the Unity Gateway embeddings API
 │       ├── http_client.py     # retrying HTTP session and file download
+│       ├── lakebase.py        # Lakebase synced table of the searchable chunks
 │       ├── schemas.py         # Spark schemas of the medallion tables
 │       ├── search_plan.py     # choose which searches a run spends its budget on
 │       ├── tables.py          # create/label tables and build their incremental MERGEs
@@ -261,8 +281,10 @@ llmops-nicholasmisawo/
 │   ├── 01_ingestion/
 │   │   ├── bronze_fcr_documents.py
 │   │   └── silver_fcr_documents.py
-│   └── 02_processing/
-│       └── process_fcr_documents.py
+│   ├── 02_processing/
+│   │   └── process_fcr_documents.py
+│   └── 03_retrieval/
+│       └── sync_fcr_chunks_to_lakebase.py
 ├── resources/
 │   └── fcr_pipeline.job.yml
 ├── tests/
@@ -272,6 +294,8 @@ llmops-nicholasmisawo/
 │   ├── test_config.py
 │   ├── test_curation.py
 │   ├── test_download.py
+│   ├── test_embeddings.py
+│   ├── test_lakebase.py
 │   ├── test_schemas.py
 │   ├── test_search_plan.py
 │   ├── test_serpapi_source.py
@@ -293,7 +317,7 @@ llmops-nicholasmisawo/
 - `src/fcr_curator/`: reusable Python package for configuration (including the assistant system prompt), sources, curation rules, downloads, table schemas and MERGEs, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `SOURCE_SCHEMA`.
 - `notebooks/01_ingestion/`: FCR discovery and curation pipelines.
 - `notebooks/02_processing/`: PDF parsing with `ai_parse_document`, chunking with both strategies in `chunking.py`, and a side-by-side comparison of their chunk sizes.
-- `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
+- `notebooks/03_retrieval/`: the Lakebase sync of the searchable chunks; semantic, filtered and hybrid search come next.
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
 - `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks: one scheduled pipeline job.
 - `databricks.yml`: deployment targets (`dev`, `acc`, `prd`), bundle variables (`usage_policy_id`, `schedule_pause_status`), and bundle configuration.
