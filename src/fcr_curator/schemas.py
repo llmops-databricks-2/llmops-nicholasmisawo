@@ -1,9 +1,15 @@
-"""Spark schemas of the project's medallion Delta tables, shared by the notebooks that write and read them."""
+"""Column layouts of every Delta table, in pipeline order.
+
+bronze_fcr_search_log         one row per SerpAPI search          (SEARCH_LOG_SCHEMA)
+bronze_fcr_documents          every search result found           (BRONZE_SCHEMA)
+silver_fcr_documents          curated FCRs + where each file is   (SILVER_SCHEMA)
+silver_parsed_fcr_documents   ai_parse_document output            (PARSED_SCHEMA)
+gold_fcr_chunks               cleaned chunks + FCR metadata       (CHUNKS_SCHEMA)
+"""
 
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
-    FloatType,
     IntegerType,
     LongType,
     StringType,
@@ -92,7 +98,7 @@ PARSED_SCHEMA = StructType(
     ]
 )
 
-# gold_fcr_chunks: cleaned text chunks with the FCR's metadata and an embedding, the RAG source
+# gold_fcr_chunks: cleaned text chunks with the FCR's metadata, the RAG source; not embedded yet
 CHUNKS_SCHEMA = StructType(
     [
         StructField("id", StringType(), False),  # <document_id>_<chunk_id>, the vector index primary key
@@ -106,6 +112,5 @@ CHUNKS_SCHEMA = StructType(
         StructField("reporting_year", IntegerType(), True),
         StructField("file_url", StringType(), True),
         StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that chunked the document
-        StructField("embedding", ArrayType(FloatType()), True),
     ]
 )
