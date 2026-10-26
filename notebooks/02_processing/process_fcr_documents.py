@@ -4,7 +4,10 @@
 # MAGIC
 # MAGIC 1. Remove parsed rows and chunks of FCRs silver no longer has
 # MAGIC 2. Parse newly downloaded PDFs with `ai_parse_document` into `silver_parsed_fcr_documents`
-# MAGIC 3. Turn each text and table element into a cleaned chunk with its FCR's metadata, in `gold_fcr_chunks`
+# MAGIC 3. Chunk every parsed FCR with each strategy in `chunking.py`, adding the FCR's metadata:
+# MAGIC    - `gold_fcr_chunks`: one chunk per text or table element
+# MAGIC    - `gold_fcr_chunks_by_section`: one chunk per section, size-limited (like Unstructured's `by_title`)
+# MAGIC 4. Compare the two strategies side by side
 # MAGIC
 # MAGIC Chunks are not embedded yet. Why `ai_parse_document`:
 # MAGIC
@@ -13,16 +16,18 @@
 # MAGIC | **AI Parse Documents** | Best: handles every insurer's layout and keeps the solvency and capital tables; runs in the workspace |
 # MAGIC | PyPDF2 | Loses tables; poor with complex layouts |
 # MAGIC | pdfplumber | Good tables, but needs tuning per insurer template |
-# MAGIC | Unstructured.io | Sends documents to an outside service |
+# MAGIC | Unstructured.io | Open-source library runs locally, but its accurate `hi_res` mode needs system packages (OCR, PDF tools) serverless can't install; the hosted API sends documents outside the workspace |
 
 # COMMAND ----------
 
+from functools import reduce
+
 from databricks.sdk.runtime import dbutils
-from loguru import logger
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, length, percentile_approx
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.functions import avg, col, count, length, lit, percentile_approx, when
 from pyspark.sql.functions import max as spark_max
-from pyspark.sql.functions import min as spark_min
+from pyspark.sql.functions import round as spark_round
+from pyspark.sql.functions import sum as spark_sum
 
 from fcr_curator.config import load_config
 from fcr_curator.data_processor import DataProcessor
@@ -41,24 +46,29 @@ processor = DataProcessor(spark=spark, config=cfg)
 processor.process_and_save()
 
 # COMMAND ----------
-# Summary
+# 4. Compare the chunking strategies side by side
 
-parsed_df = spark.table(processor.parsed_table)
-chunks_df = spark.table(processor.chunks_table)
-logger.info(f"Parsed FCRs: {parsed_df.count()}; chunks: {chunks_df.count()}")
+chunks_by_strategy = reduce(
+    DataFrame.unionByName,
+    [spark.table(table).withColumn("strategy", lit(table.split(".")[-1])) for table in processor.chunk_tables],
+).withColumn("chars", length("text"))
 
-# Chunk sizes in characters: the starting point for reviewing the chunking strategy
-chunks_df.select(
-    spark_min(length("text")).alias("min_chars"),
-    percentile_approx(length("text"), 0.5).alias("median_chars"),
-    spark_max(length("text")).alias("max_chars"),
-).show()
+# Size per strategy, in characters. Under 50 is usually noise; over 2,000 (~500 tokens) is too broad to retrieve well
+chunks_by_strategy.groupBy("strategy").agg(
+    count("*").alias("chunks"),
+    spark_round(avg("chars")).alias("avg"),
+    percentile_approx("chars", 0.5).alias("median"),
+    percentile_approx("chars", 0.9).alias("p90"),
+    spark_max("chars").alias("max"),
+    spark_sum(when(col("chars") < 50, 1).otherwise(0)).alias("under_50"),
+    spark_sum(when(col("chars") > 2000, 1).otherwise(0)).alias("over_2000"),
+).orderBy("strategy").show(truncate=False)
 
-chunks_df.groupBy("institution", "reporting_year").agg(count("*").alias("chunks")).orderBy(col("chunks").desc()).show(
-    10, truncate=60
-)
-
-# Parsed FCRs with no chunks are retried every run; list them so they can be looked at
-parsed_df.join(chunks_df.select("document_id").distinct(), "document_id", "left_anti").select("volume_path").show(
-    truncate=False
+# The same FCR under each strategy: its first chunks, in order
+sample_id = spark.table(processor.parsed_table).select("document_id").orderBy("document_id").first()[0]
+(
+    chunks_by_strategy.where(col("document_id") == sample_id)
+    .orderBy("strategy", "page_id", col("chunk_id").cast("int"))
+    .select("strategy", "page_id", "chars", "text")
+    .show(30, truncate=120)
 )
