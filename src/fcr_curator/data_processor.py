@@ -6,9 +6,10 @@ silver_parsed_fcr_documents   the parser's output as JSON
     | chunk_parsed_documents    one gold table per chunking strategy (see chunking.py)
 gold_fcr_chunks               strategy 1: one chunk per element
 gold_fcr_chunks_by_section    strategy 2: one chunk per section, size-limited
+    | embed_pending_chunks      embeddings, for the strategy kept for search only
 
-Each FCR is parsed once and chunked once per strategy, so a re-run only handles FCRs downloaded since.
-Nothing is embedded yet.
+Each FCR is parsed once and chunked once per strategy, and each chunk is embedded once, so a re-run
+only handles FCRs downloaded since.
 """
 
 from collections.abc import Callable
@@ -21,8 +22,9 @@ from pyspark.sql.functions import col, concat_ws, explode, expr, lit, regexp_rep
 from fcr_curator.chunking import Chunk, element_chunks, section_chunks
 from fcr_curator.config import ProjectConfig
 from fcr_curator.download import processed_stamp
-from fcr_curator.schemas import CHUNKS_SCHEMA, PARSED_SCHEMA
-from fcr_curator.tables import KEY, ensure_table
+from fcr_curator.embeddings import EmbedBatch, embed_texts
+from fcr_curator.schemas import CHUNKS_SCHEMA, EMBEDDED_CHUNKS_SCHEMA, EMBEDDING_FIELD, PARSED_SCHEMA
+from fcr_curator.tables import KEY, ensure_table, record_embeddings_sql
 
 # Turn off the model-written figure descriptions: they cost extra, and chunks only use text and tables
 PARSE_OPTIONS = "map('version', '2.0', 'descriptionElementTypes', '')"
@@ -33,22 +35,31 @@ CHUNKING_STRATEGIES: dict[str, Callable[[str | None], list[Chunk]]] = {
     "gold_fcr_chunks": element_chunks,
     "gold_fcr_chunks_by_section": section_chunks,
 }
+# The strategy kept for search: its chunks are embedded and synced to Lakebase
+SEARCH_CHUNKS_TABLE = "gold_fcr_chunks_by_section"
+# Chunks embedded and saved per batch, so a failure keeps the batches already done
+EMBED_SAVE_BATCH = 2000
 
 
 # --- The Spark workflow -----------------------------------------------------------------------
 
 
 class DataProcessor:
-    """Runs parse -> chunk over silver, one FCR at a time, never repeating work."""
+    """Runs parse -> chunk -> embed over silver, never repeating work.
 
-    def __init__(self, spark: SparkSession, config: ProjectConfig) -> None:
+    embed embeds a batch of texts (see embeddings.gateway_embedder); None skips embedding.
+    """
+
+    def __init__(self, spark: SparkSession, config: ProjectConfig, embed: EmbedBatch | None = None) -> None:
         self.spark = spark
         self.cfg = config
+        self.embed = embed
         self.documents_table = f"{config.full_schema_name}.silver_fcr_documents"
         self.parsed_table = f"{config.full_schema_name}.silver_parsed_fcr_documents"
         self.chunk_tables = {
             f"{config.full_schema_name}.{name}": chunker for name, chunker in CHUNKING_STRATEGIES.items()
         }
+        self.search_table = f"{config.full_schema_name}.{SEARCH_CHUNKS_TABLE}"
         self.run_stamp = processed_stamp(datetime.now(UTC))
 
     def process_and_save(self) -> None:
@@ -58,6 +69,8 @@ class DataProcessor:
         logger.info(f"Parsed {self.parse_pending_documents()} documents into {self.parsed_table}")
         for table, chunker in self.chunk_tables.items():
             logger.info(f"Wrote {self.chunk_parsed_documents(table, chunker)} chunks to {table}")
+        if self.embed:
+            logger.info(f"Embedded {self.embed_pending_chunks()} chunks in {self.search_table}")
 
     def ensure_tables(self) -> None:
         """Create the parsed table and one chunks table per strategy, if they're missing."""
@@ -72,9 +85,15 @@ class DataProcessor:
             comment="Silver: ai_parse_document output for each downloaded FCR, parsed once.",
         )
         for table, chunker in self.chunk_tables.items():
-            comment = f"Gold: FCR chunks made by chunking.{chunker.__name__}, with document metadata; not embedded yet."
-            ensure_table(self.spark, table, CHUNKS_SCHEMA, layer="gold", comment=comment)
-            # Change Data Feed lets a Vector Search index or Lakebase synced table follow this table's changes
+            searched = table == self.search_table
+            schema = EMBEDDED_CHUNKS_SCHEMA if searched else CHUNKS_SCHEMA
+            comment = f"Gold: FCR chunks made by chunking.{chunker.__name__}, with document metadata" + (
+                " and embeddings; synced to Lakebase for search." if searched else "; not embedded."
+            )
+            ensure_table(self.spark, table, schema, layer="gold", comment=comment)
+            if searched and EMBEDDING_FIELD.name not in self.spark.table(table).columns:  # Created before embeddings
+                self.spark.sql(f"ALTER TABLE {table} ADD COLUMNS ({EMBEDDING_FIELD.name} ARRAY<FLOAT>)")
+            # Change Data Feed lets a Lakebase synced table follow this table's changes
             self.spark.sql(f"ALTER TABLE {table} SET TBLPROPERTIES (delta.enableChangeDataFeed = true)")
 
     def remove_dropped_documents(self) -> None:
@@ -129,3 +148,17 @@ class DataProcessor:
         chunks_df.select(*CHUNKS_SCHEMA.fieldNames()).write.format("delta").mode("append").saveAsTable(table)
         # Count from the table: counting the DataFrame would run the chunking again
         return self.spark.table(table).where(col("processed") == self.run_stamp).count()
+
+    def embed_pending_chunks(self) -> int:
+        """Embed the search table's chunks that have no embedding yet; return how many were embedded."""
+        pending = self.spark.table(self.search_table).where(col("embedding").isNull()).select("id", "text").collect()
+        for start in range(0, len(pending), EMBED_SAVE_BATCH):
+            batch = pending[start : start + EMBED_SAVE_BATCH]
+            vectors = embed_texts([row.text for row in batch], self.embed)
+            self.spark.createDataFrame(
+                [(row.id, vector) for row, vector in zip(batch, vectors, strict=True)],
+                "id string, embedding array<float>",
+            ).createOrReplaceTempView("new_embeddings")
+            self.spark.sql(record_embeddings_sql(self.search_table, "new_embeddings"))
+            logger.info(f"Embedded {start + len(batch)} of {len(pending)} chunks")
+        return len(pending)

@@ -7,9 +7,10 @@
 # MAGIC 3. Chunk every parsed FCR with each strategy in `chunking.py`, adding the FCR's metadata:
 # MAGIC    - `gold_fcr_chunks`: one chunk per text or table element
 # MAGIC    - `gold_fcr_chunks_by_section`: one chunk per section, size-limited (like Unstructured's `by_title`)
-# MAGIC 4. Compare the two strategies side by side
+# MAGIC 4. Embed the section chunks (the strategy kept for search) through the Unity Gateway
+# MAGIC 5. Compare the two strategies side by side
 # MAGIC
-# MAGIC Chunks are not embedded yet. Why `ai_parse_document`:
+# MAGIC Why `ai_parse_document`:
 # MAGIC
 # MAGIC | Tool | Fit for Bermuda FCRs |
 # MAGIC |------|---------------------|
@@ -22,6 +23,7 @@
 
 from functools import reduce
 
+from databricks.sdk import WorkspaceClient
 from databricks.sdk.runtime import dbutils
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import avg, col, count, length, lit, percentile_approx, when
@@ -31,6 +33,7 @@ from pyspark.sql.functions import sum as spark_sum
 
 from fcr_curator.config import load_config
 from fcr_curator.data_processor import DataProcessor
+from fcr_curator.embeddings import gateway_client, gateway_embedder
 
 # COMMAND ----------
 # Settings
@@ -38,19 +41,26 @@ from fcr_curator.data_processor import DataProcessor
 spark = SparkSession.builder.getOrCreate()
 dbutils.widgets.text("env", "dev")
 cfg = load_config("../../project_config.yml", env=dbutils.widgets.get("env"))
-processor = DataProcessor(spark=spark, config=cfg)
+# SQL ai_query can't call the course's embedding service, so embeddings go through the Unity Gateway API
+embed = gateway_embedder(gateway_client(WorkspaceClient()), cfg.embedding_endpoint)
+processor = DataProcessor(spark=spark, config=cfg, embed=embed)
 
 # COMMAND ----------
-# 1-3. Parse and chunk (each FCR is handled once; re-runs only pick up new downloads)
+# 1-4. Parse, chunk and embed (each FCR and chunk is handled once; re-runs only pick up new downloads)
 
 processor.process_and_save()
 
 # COMMAND ----------
-# 4. Compare the chunking strategies side by side
+# 5. Compare the chunking strategies side by side
 
 chunks_by_strategy = reduce(
     DataFrame.unionByName,
-    [spark.table(table).withColumn("strategy", lit(table.split(".")[-1])) for table in processor.chunk_tables],
+    [
+        spark.table(table)
+        .select("document_id", "chunk_id", "page_id", "text")
+        .withColumn("strategy", lit(table.split(".")[-1]))
+        for table in processor.chunk_tables
+    ],
 ).withColumn("chars", length("text"))
 
 # Size per strategy, in characters. Under 50 is usually noise; over 2,000 (~500 tokens) is too broad to retrieve well
@@ -72,3 +82,8 @@ sample_id = spark.table(processor.parsed_table).select("document_id").orderBy("d
     .select("strategy", "page_id", "chars", "text")
     .show(30, truncate=120)
 )
+
+# Every chunk kept for search should now have an embedding
+spark.table(processor.search_table).select(
+    count("*").alias("chunks"), spark_sum(when(col("embedding").isNull(), 1).otherwise(0)).alias("not_embedded")
+).show()
