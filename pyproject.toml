@@ -1,7 +1,7 @@
 [project]
-name = "consultation-paper-curator"
+name = "fcr-curator"
 dynamic = ["version"]
-description = "Databricks LLMOps application for curating regulatory consultation papers"
+description = "Databricks LLMOps application for curating Bermuda Financial Condition Reports"
 requires-python = "==3.12.*"
 dependencies = [
     "cffi==1.17.1",
@@ -24,7 +24,6 @@ dependencies = [
     "psycopg==3.3.2",
     "psycopg-pool==3.3.0",
     "psycopg[binary]==3.3.2",
-    "beautifulsoup4==4.15.0",
     "requests>=2.32,<3"
 ]
 
@@ -40,7 +39,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where =["src"]
-include = ["consultation_paper_curator*"]
+include = ["fcr_curator*"]
 
 [tool.setuptools.dynamic]
 version = { file = "version.txt" }

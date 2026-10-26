@@ -1,5 +1,6 @@
 """Shared pytest fixtures."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,6 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
-def bma_cards_html() -> str:
-    """Return a BMA fetchdata fragment: one full card (with duplicate links) and one missing its id."""
-    return (FIXTURES / "bma_cards.html").read_text()
+def serpapi_page() -> dict:
+    """Return a SerpAPI Google response: a Financial Condition Report, an SFCR, and a result with no link."""
+    return json.loads((FIXTURES / "serpapi_google.json").read_text())
