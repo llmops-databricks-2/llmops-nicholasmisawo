@@ -3,7 +3,7 @@
 ## Parsing
 
 `ai_parse_document` turns each PDF into typed elements, with tables kept as HTML. It runs in the
-workspace and handles every insurer's layout, which is why it was chosen over PyPDF2 (loses tables),
+workspace and handles every company's layout, which is why it was chosen over PyPDF2 (loses tables),
 pdfplumber (needs tuning per template) and Unstructured.io (its accurate mode needs system packages
 serverless can't install; its hosted API sends documents outside the workspace).
 
@@ -28,8 +28,9 @@ What the parser found across the 78 FCRs:
    - a section under 200 characters merges into the next
    - tables get chunks of their own, split by rows with the header row repeated
 
-Every chunk carries its FCR's `institution`, `reporting_year`, `domain`, `title`, `file_url` and `page_id`
-(counted from 0, as the parser numbers pages).
+Every chunk carries its FCR's `registered_name`, `institution`, `reporting_year`, `domain`, `title`,
+`file_url` and `page_id` (counted from 0, as the parser numbers pages). Every run refreshes this metadata
+from silver, so a better name or a corrected year reaches chunks written earlier.
 
 ## Findings: the comparison
 

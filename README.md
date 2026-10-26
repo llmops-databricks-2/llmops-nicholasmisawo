@@ -1,22 +1,23 @@
 # Bermuda Financial Condition Report Curator
 
-**Databricks LLMOps | Bermuda Insurer Financial Condition Intelligence**
+**Databricks LLMOps | Bermuda Insurer and Reinsurer Financial Condition Intelligence**
 
-An assistant for the Financial Condition Reports (FCRs) Bermuda commercial insurers publish. It finds each
-insurer's report, and answers questions grounded in the figures the reports disclose, with citations.
+An assistant for the Financial Condition Reports (FCRs) Bermuda commercial insurers and reinsurers
+publish. It finds each company's report, and answers questions grounded in the figures the reports
+disclose, with citations.
 Built for the **LLMOps with Databricks** course.
 
 ## The problem
 
-Under the Bermuda Monetary Authority's disclosure rules, commercial (re)insurers publish an annual FCR on
-business, governance, risk profile, solvency and capital. Each insurer posts its own PDF on its own
-website in its own layout, so comparing insurers or years means hunting down and reading dozens of long
+Under the Bermuda Monetary Authority's disclosure rules, commercial insurers and reinsurers publish an
+annual FCR on business, governance, risk profile, solvency and capital. Each company posts its own PDF on
+its own website in its own layout, so comparing companies or years means hunting down and reading dozens of long
 reports. The assistant is for analysts, reinsurance buyers, and risk and compliance teams who follow the
 market. It should answer questions like:
 
 - How did Wilton Re's solvency ratio compare with its capital requirement in 2024?
-- Which insurers reported the largest change in available statutory capital last year?
-- How do Class 4 insurers describe their exposure to catastrophe risk?
+- Which insurers and reinsurers reported the largest change in available statutory capital last year?
+- How do Class 4 (re)insurers describe their exposure to catastrophe risk?
 
 ## How it works
 
