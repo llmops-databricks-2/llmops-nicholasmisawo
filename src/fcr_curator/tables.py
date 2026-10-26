@@ -138,3 +138,16 @@ def record_downloads_sql(target: str, downloads_view: str) -> str:
             existing.processed = downloaded.processed,
             existing.volume_path = downloaded.volume_path
     """
+
+
+# --- Gold -------------------------------------------------------------------------------------
+
+
+def record_embeddings_sql(target: str, embeddings_view: str) -> str:
+    """Set the embedding on the chunks whose id is in embeddings_view."""
+    return f"""
+        MERGE INTO {target} AS existing
+        USING {embeddings_view} AS embedded
+        ON existing.id = embedded.id
+        WHEN MATCHED THEN UPDATE SET existing.embedding = embedded.embedding
+    """

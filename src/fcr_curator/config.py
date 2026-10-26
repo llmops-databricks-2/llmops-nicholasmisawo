@@ -1,11 +1,13 @@
 """Configuration management for the FCR Curator."""
 
-import os
 from pathlib import Path
 from textwrap import dedent
 
 import yaml
 from pydantic import BaseModel, Field
+
+# Folders searched for project_config.yml: the current one and its parents
+CONFIG_SEARCH_DEPTH = 3
 
 
 class ProjectConfig(BaseModel):
@@ -106,60 +108,13 @@ class ProjectConfig(BaseModel):
         return f"{self.catalog}.{self.schema}.{self.volume}"
 
 
-class ModelConfig(BaseModel):
-    """Model configuration."""
-
-    temperature: float = Field(0.7, description="Model temperature")
-    max_tokens: int = Field(2000, description="Maximum tokens")
-    top_p: float = Field(0.95, description="Top-p sampling parameter")
-
-
-class VectorSearchConfig(BaseModel):
-    """Vector search configuration."""
-
-    embedding_dimension: int = Field(1024, description="Embedding dimension")
-    similarity_metric: str = Field("cosine", description="Similarity metric")
-    num_results: int = Field(5, description="Number of results to return")
-
-
-class ChunkingConfig(BaseModel):
-    """Chunking configuration."""
-
-    chunk_size: int = Field(512, description="Chunk size in tokens")
-    chunk_overlap: int = Field(50, description="Overlap between chunks")
-    separator: str = Field("\n\n", description="Separator for chunking")
-
-
 def load_config(config_path: str = "project_config.yml", env: str = "dev") -> ProjectConfig:
-    """Load project configuration.
+    """Load the settings for env, looking for a relative config_path in the current folder and its parents.
 
-    Args:
-        config_path: Path to configuration file
-        env: Environment name
-
-    Returns:
-        ProjectConfig instance
-
+    Notebooks run from notebooks/<stage>/, so the config at the repository root is two levels up.
     """
-    # Handle relative paths from notebooks
-    if not Path(config_path).is_absolute():
-        # Try to find config in parent directories
-        current = Path.cwd()
-        for _ in range(3):  # Search up to 3 levels
-            candidate = current / config_path
-            if candidate.exists():
-                config_path = str(candidate)
-                break
-            current = current.parent
-
-    return ProjectConfig.from_yaml(config_path, env)
-
-
-def get_env() -> str:
-    """Get current environment from environment variable.
-
-    Returns:
-        Environment name (dev, acc, or prd)
-
-    """
-    return os.getenv("ENV", "dev")
+    path = Path(config_path)
+    if not path.is_absolute():
+        folders = [Path.cwd(), *Path.cwd().parents][:CONFIG_SEARCH_DEPTH]
+        path = next((folder / config_path for folder in folders if (folder / config_path).exists()), path)
+    return ProjectConfig.from_yaml(str(path), env)

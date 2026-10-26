@@ -5,11 +5,13 @@ bronze_fcr_documents          every search result found           (BRONZE_SCHEMA
 silver_fcr_documents          curated FCRs + where each file is   (SILVER_SCHEMA)
 silver_parsed_fcr_documents   ai_parse_document output            (PARSED_SCHEMA)
 gold_fcr_chunks               cleaned chunks + FCR metadata       (CHUNKS_SCHEMA)
+gold_fcr_chunks_by_section    the same, plus an embedding         (EMBEDDED_CHUNKS_SCHEMA)
 """
 
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
+    FloatType,
     IntegerType,
     LongType,
     StringType,
@@ -114,3 +116,7 @@ CHUNKS_SCHEMA = StructType(
         StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that chunked the document
     ]
 )
+
+# The chunks table kept for search also holds each chunk's embedding (None until embedded)
+EMBEDDING_FIELD = StructField("embedding", ArrayType(FloatType()), True)
+EMBEDDED_CHUNKS_SCHEMA = StructType([*CHUNKS_SCHEMA.fields, EMBEDDING_FIELD])

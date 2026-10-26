@@ -1,7 +1,13 @@
 """Tests for the incremental MERGE statements that update the bronze and silver tables."""
 
 from fcr_curator.schemas import SILVER_METADATA_SCHEMA, SOURCE_SCHEMA
-from fcr_curator.tables import bronze_merge_sql, delisted_ids, record_downloads_sql, silver_merge_sql
+from fcr_curator.tables import (
+    bronze_merge_sql,
+    delisted_ids,
+    record_downloads_sql,
+    record_embeddings_sql,
+    silver_merge_sql,
+)
 
 SOURCE_COLUMNS = SOURCE_SCHEMA.fieldNames()
 SILVER_COLUMNS = SILVER_METADATA_SCHEMA.fieldNames()
@@ -79,3 +85,12 @@ def test_record_downloads_sets_only_the_storage_columns() -> None:
     assert "existing.processed = downloaded.processed" in updated
     assert "existing.volume_path = downloaded.volume_path" in updated
     assert updated.count(" = ") == 2
+
+
+def test_record_embeddings_sets_only_the_embedding_by_chunk_id() -> None:
+    """Recording embeddings matches chunks on id and touches nothing but the embedding."""
+    sql = record_embeddings_sql("chunks", "new_embeddings")
+    updated = _clause(sql, "MATCHED THEN")
+
+    assert "ON existing.id = embedded.id" in sql
+    assert updated.strip().endswith("UPDATE SET existing.embedding = embedded.embedding")

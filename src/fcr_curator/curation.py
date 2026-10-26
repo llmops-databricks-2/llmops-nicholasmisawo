@@ -31,6 +31,9 @@ YEAR_BESIDE_NAME_PATTERN = re.compile(
 # Leftovers around an institution's name once the report's name is cut out of a title
 TITLE_LEFTOVERS = re.compile(r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+")
 
+# Sorts a result Google gave no rank after every ranked one
+UNRANKED = float("inf")
+
 # Never curated, whatever search returns; subdomains are excluded too (cdn.bma.bm, osc.ny.gov)
 EXCLUDED_DOMAINS = (
     "bma.bm",  # The regulator's site, not an insurer's
@@ -141,6 +144,11 @@ def curate_document(raw: dict, today: date | None = None) -> dict:
     }
 
 
+def _preference(document: dict) -> tuple:
+    # Still returned by search first, then the best-ranked, then the first found
+    return (not document["is_listed"], document["search_rank"] or UNRANKED, document["first_seen_at"] or "")
+
+
 def deduplicate(documents: list[dict]) -> list[dict]:
     """Keep one document per (domain, institution, reporting year).
 
@@ -154,10 +162,8 @@ def deduplicate(documents: list[dict]) -> list[dict]:
 
     kept = []
     for group in groups.values():
-        group.sort(key=lambda d: (not d["is_listed"], d["search_rank"] or 999, d["first_seen_at"] or ""))
-        best, *duplicates = group
-        best["superseded_ids"] = [d["document_id"] for d in duplicates]
-        kept.append(best)
+        best, *duplicates = sorted(group, key=_preference)
+        kept.append({**best, "superseded_ids": [d["document_id"] for d in duplicates]})
 
     return sorted(kept, key=lambda d: (-(d["reporting_year"] or 0), d["institution"] or ""))
 

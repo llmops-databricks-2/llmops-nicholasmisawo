@@ -196,3 +196,16 @@ def test_keep_reported_since_drops_older_and_undated_documents() -> None:
 
     assert keep_reported_since(documents, 2020) == [{"reporting_year": 2020}]
     assert keep_reported_since(documents, None) == documents
+
+
+def test_curate_leaves_the_bronze_rows_it_was_given_unchanged() -> None:
+    """Curation returns new rows; the caller's rows aren't modified."""
+    rows = [
+        raw("copy", "Example Re Ltd. FCR 2024", "https://x.com/cdn/a.pdf", search_rank=7),
+        raw("original", "Example Re Ltd. FCR 2024", "https://x.com/a.pdf"),
+    ]
+    before = [dict(row) for row in rows]
+
+    curate(rows, today=TODAY)
+
+    assert rows == before
