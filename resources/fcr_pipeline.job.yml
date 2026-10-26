@@ -6,6 +6,7 @@
 #   bronze_fcr_documents   search for FCRs with SerpAPI and upsert bronze
 #   silver_fcr_documents   curate bronze into silver, download new PDFs
 #   process_fcr_documents  parse, chunk and embed newly downloaded FCRs
+#   sync_fcr_chunks_to_lakebase  create or refresh the Lakebase synced table of the chunks
 #
 # Every stage is incremental, so re-runs only pick up new or changed FCRs.
 # A single stage can still be run on its own from the job page by choosing
@@ -64,3 +65,10 @@ resources:
           environment_key: default
           notebook_task:
             notebook_path: ../notebooks/02_processing/process_fcr_documents.py
+
+        - task_key: sync_fcr_chunks_to_lakebase
+          depends_on:
+            - task_key: process_fcr_documents
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/03_retrieval/sync_fcr_chunks_to_lakebase.py
