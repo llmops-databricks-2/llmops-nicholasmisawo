@@ -10,6 +10,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 
 import requests
 from loguru import logger
@@ -19,6 +20,14 @@ from fcr_curator.http_client import download_file
 # A PDF starts with "%PDF-", possibly after some junk; PDF readers look in the first 1024 bytes
 PDF_HEADER = b"%PDF-"
 PDF_HEADER_WINDOW = 1024
+
+
+class DownloadOutcome(StrEnum):
+    """What happened to one download attempt; the values match DownloadStats' fields."""
+
+    DOWNLOADED = "downloaded"
+    FAILED = "failed"
+    REJECTED = "rejected"
 
 
 @dataclass(frozen=True)
@@ -60,16 +69,15 @@ def _stored_file(path: str) -> StoredFile:
     return StoredFile(path, processed_stamp(datetime.fromtimestamp(os.path.getmtime(path), UTC)))
 
 
-def _fetch(document: dict, path: str, session: requests.Session, download: Callable) -> str:
-    """Download one document; return 'downloaded', 'failed' or 'rejected'."""
+def _fetch(document: dict, path: str, session: requests.Session, download: Callable) -> DownloadOutcome:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if not download(session, document["file_url"], path):
-        return "failed"
+        return DownloadOutcome.FAILED
     if document["file_type"] == "pdf" and not is_pdf_file(path):
         logger.warning(f"Not a PDF, removed: {document['file_url']}")
         os.remove(path)
-        return "rejected"
-    return "downloaded"
+        return DownloadOutcome.REJECTED
+    return DownloadOutcome.DOWNLOADED
 
 
 def download_documents(
@@ -86,23 +94,23 @@ def download_documents(
     of every document now in the volume, by document_id, and the run's counts.
     """
     stored: dict[str, StoredFile] = {}
-    counts: Counter[str] = Counter()
+    skipped = 0
+    attempts: Counter[DownloadOutcome] = Counter()
 
     for document in documents:
         path = document_path(volume_root, document)
 
         if os.path.exists(path):
-            counts["skipped"] += 1
+            skipped += 1
         else:
-            attempts = counts["downloaded"] + counts["failed"] + counts["rejected"]
-            if max_downloads is not None and attempts >= max_downloads:
+            if max_downloads is not None and attempts.total() >= max_downloads:
                 continue
             outcome = _fetch(document, path, session, download)
-            counts[outcome] += 1
-            if outcome != "downloaded":
+            attempts[outcome] += 1
+            if outcome != DownloadOutcome.DOWNLOADED:
                 continue
             time.sleep(pause_seconds)  # Be polite to insurers' websites
 
         stored[document["document_id"]] = _stored_file(path)
 
-    return stored, DownloadStats(**counts)
+    return stored, DownloadStats(skipped=skipped, **{outcome.value: count for outcome, count in attempts.items()})
