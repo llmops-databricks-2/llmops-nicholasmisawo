@@ -1,0 +1,31 @@
+{
+  "search_metadata": {
+    "id": "fixture",
+    "status": "Success"
+  },
+  "search_information": {
+    "organic_results_state": "Results for exact spelling"
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "Example Re Ltd. - Financial Condition Report 2024",
+      "link": "https://WWW.Example-Re.com/files/FCR-2024.pdf#page=1",
+      "displayed_link": "https://www.example-re.com › files",
+      "snippet": "Financial Condition Report for the year ended December 31, 2024. Bermuda Monetary Authority.",
+      "source": "Example Re"
+    },
+    {
+      "position": 2,
+      "title": "Example Insurance Europe SE Solvency and Financial Condition Report 2024",
+      "link": "https://example-europe.eu/sfcr-2024.pdf",
+      "displayed_link": "https://example-europe.eu",
+      "snippet": "Solvency and Financial Condition Report ...",
+      "source": "Example Europe"
+    },
+    {
+      "position": 3,
+      "title": "Result without a link"
+    }
+  ]
+}

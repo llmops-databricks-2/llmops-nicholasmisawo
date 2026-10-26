@@ -2,7 +2,7 @@
 
 import json
 
-from consultation_paper_curator.data_processor import Chunk, clean_chunk, extract_chunks
+from fcr_curator.data_processor import Chunk, clean_chunk, extract_chunks
 
 
 def parsed(*elements: dict) -> str:
@@ -29,10 +29,10 @@ def test_clean_chunk_collapses_newlines_and_whitespace() -> None:
 def test_extract_chunks_keeps_text_and_tables_only() -> None:
     """Titles, headers, footers and page numbers are left out; text and tables are kept in order."""
     content = parsed(
-        element(0, "title", "Consultation Paper"),
-        element(1, "text", "The Authority proposes"),
-        element(2, "page_footer", "BMA"),
-        element(3, "table", "<table><tr><td>Fee</td></tr></table>"),
+        element(0, "title", "Financial Condition Report"),
+        element(1, "text", "The Company's BSCR ratio"),
+        element(2, "page_footer", "Example Re"),
+        element(3, "table", "<table><tr><td>Capital</td></tr></table>"),
         element(4, "page_number", "2"),
     )
 
@@ -41,9 +41,9 @@ def test_extract_chunks_keeps_text_and_tables_only() -> None:
 
 def test_extract_chunks_records_cleaned_text_and_first_page() -> None:
     """Each chunk carries its element id as a string, its first page, and cleaned text."""
-    content = parsed(element(7, "text", "comment by\n31 March", page_id=4))
+    content = parsed(element(7, "text", "solvency ratio\nof 250%", page_id=4))
 
-    assert extract_chunks(content) == [Chunk("7", 4, "comment by 31 March")]
+    assert extract_chunks(content) == [Chunk("7", 4, "solvency ratio of 250%")]
 
 
 def test_extract_chunks_leaves_page_unset_without_a_bounding_box() -> None:
@@ -59,6 +59,6 @@ def test_extract_chunks_drops_elements_empty_after_cleaning() -> None:
 
 
 def test_extract_chunks_returns_nothing_for_missing_content() -> None:
-    """A paper whose parse produced no content yields no chunks rather than failing."""
+    """A document whose parse produced no content yields no chunks rather than failing."""
     assert extract_chunks(None) == []
     assert extract_chunks(json.dumps({"error_status": [{"error_message": "x"}]})) == []

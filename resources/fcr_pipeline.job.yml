@@ -1,0 +1,66 @@
+# FCR Pipeline
+#
+# One job running the medallion stages in order, each task starting only
+# once the one before it succeeds:
+#
+#   bronze_fcr_documents   search for FCRs with SerpAPI and upsert bronze
+#   silver_fcr_documents   curate bronze into silver, download new PDFs
+#   process_fcr_documents  parse, chunk and embed newly downloaded FCRs
+#
+# Every stage is incremental, so re-runs only pick up new or changed FCRs.
+# A single stage can still be run on its own from the job page by choosing
+# that task when starting a run.
+#
+# Runs weekly, Mondays at 06:00 Bermuda time: insurers publish FCRs once a
+# year, mostly in the months after their year-end filing deadlines, and every
+# run's searches are billed by SerpAPI. The schedule is paused everywhere
+# except prd (schedule_pause_status in databricks.yml).
+#
+# Runs as Databricks serverless notebook tasks using the packaged project
+# wheel. The target environment (dev/acc/prd) determines the catalog,
+# schema, and configuration loaded from project_config.yml. The job name is
+# environment-specific because every target deploys to the same workspace.
+
+resources:
+  jobs:
+    fcr_pipeline:
+      name: fcr_pipeline-${bundle.target}
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"
+        timezone_id: "Atlantic/Bermuda"
+        pause_status: ${var.schedule_pause_status}
+      budget_policy_id: ${var.usage_policy_id}
+      # Passed to every task's notebook as a widget. dry_run=true makes bronze print its search plan
+      # and budget without spending any SerpAPI searches, e.g.
+      #   databricks bundle run fcr_pipeline -t dev --only bronze_fcr_documents --params dry_run=true
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: dry_run
+          default: "false"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: bronze_fcr_documents
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/01_ingestion/bronze_fcr_documents.py
+
+        - task_key: silver_fcr_documents
+          depends_on:
+            - task_key: bronze_fcr_documents
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/01_ingestion/silver_fcr_documents.py
+
+        - task_key: process_fcr_documents
+          depends_on:
+            - task_key: silver_fcr_documents
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/02_processing/process_fcr_documents.py

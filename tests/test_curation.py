@@ -1,34 +1,35 @@
-"""Tests for the consultation paper curation rules."""
+"""Tests for the FCR curation rules."""
 
-from datetime import date, datetime
+from datetime import date
 
 import pytest
 
-from consultation_paper_curator.curation import (
-    DOC_KIND_PREFIXES,
+from fcr_curator.curation import (
     DOC_KINDS,
     classify_doc_kind,
     curate,
-    extract_emails,
     file_type,
+    institution,
     keep_doc_kinds,
-    keep_published_since,
+    keep_reported_since,
     normalize_title,
-    original_upload,
+    reporting_year,
 )
 
-CDN = "https://cdn.bma.bm/documents/"
+TODAY = date(2026, 10, 25)
 
 
-def raw(document_id: str, title: str, url: str, uploaded_date: str = "2026-01-01", **extra: object) -> dict:
-    """Build a raw BMA row as the ingestion notebook writes it."""
+def raw(document_id: str, title: str, url: str, **extra: object) -> dict:
+    """Build a bronze row as the ingestion notebook writes it."""
     return {
         "document_id": document_id,
         "title": title,
-        "pdf_url": CDN + url,
-        "uploaded_date": uploaded_date,
-        "source": "bma",
-        "is_archived": False,
+        "pdf_url": url,
+        "domain": "example-re.com",
+        "source": "serpapi",
+        "search_rank": 1,
+        "is_listed": True,
+        "first_seen_at": "2026-10-25T00:00:00+00:00",
         **extra,
     }
 
@@ -36,172 +37,144 @@ def raw(document_id: str, title: str, url: str, uploaded_date: str = "2026-01-01
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        (CDN + "2026-01-01-00-00-00-Paper.pdf", "pdf"),
-        (CDN + "2023-08-22-12-37-34-Group-2024-BSCR.xlsm", "xlsm"),
-        (CDN + "2023-05-22-15-08-57-Recovery-Rules.docx.pdf", "pdf"),
+        ("https://x.com/files/FCR-2024.pdf", "pdf"),
+        ("https://x.com/files/FCR-2024.PDF?v=2", "pdf"),
+        ("https://x.com/download?id=7", ""),
     ],
 )
 def test_file_type(url: str, expected: str) -> None:
-    """The file type is the lower-cased final extension of the URL."""
+    """The file type is the lower-cased extension of the URL path, ignoring any query string."""
     assert file_type(url) == expected
 
 
-def test_normalize_title_fixes_quotes_and_dashes() -> None:
-    """Curly quotes, en dashes and CSV-doubled quotes become plain ASCII."""
-    assert (
-        normalize_title('"Stakeholder Letter – Updates to ""Proposed Enhancements"""')
-        == 'Stakeholder Letter - Updates to "Proposed Enhancements"'
-    )
-
-
-def test_normalize_title_collapses_repeated_prefix() -> None:
-    """A title prefix repeated by mistake appears only once."""
-    assert normalize_title("Discussion Paper - Discussion Paper - Climate Risks") == "Discussion Paper - Climate Risks"
+def test_normalize_title_drops_google_ellipsis_and_fixes_dashes() -> None:
+    """A title Google truncated loses its ellipsis, and en dashes become hyphens."""
+    assert normalize_title("Example Re – Financial Condition Report ...") == "Example Re - Financial Condition Report"
 
 
 @pytest.mark.parametrize(
-    ("title", "url", "expected"),
+    ("title", "url", "snippet", "expected"),
     [
-        ("Consultation Paper - Basic Bank Accounts", "x.pdf", "consultation_paper"),
-        ("NAMLC Consultation Paper - Trustee Act", "x.pdf", "consultation_paper"),
-        ("Discussion Paper - Asset Tokenisation", "x.pdf", "discussion_paper"),
-        ("Stakeholder Letter - Feedback", "x.pdf", "stakeholder_letter"),
-        ("Notice - SCPS Consultation Guidance", "x.pdf", "notice"),
-        ("Guidance Notes for Applications", "x.pdf", "guidance"),
-        ("Digital Asset Issuance Act 2020", "x.pdf", "legislation"),
-        # The title hides the kind; the filename gives it away
-        (
-            "Proposed Amendments for the Regulation of Investment Exchanges",
-            "2023-11-16-13-49-40-Stakeholder-Letter---Proposed-Amendments.pdf",
-            "stakeholder_letter",
-        ),
+        ("Example Re Ltd. Financial Condition Report 2024", "https://x.com/a.pdf", None, "fcr"),
+        ("Document", "https://x.com/FCR_2024_final.pdf", None, "fcr"),
+        ("Example SE Solvency and Financial Condition Report 2024", "https://x.com/a.pdf", None, "sfcr"),
+        ("Example Re", "https://x.com/report.pdf", "The Financial Condition Report sets out", "fcr"),
+        ("Annual Report 2024", "https://x.com/annual.pdf", "Results for the year", "other"),
     ],
 )
-def test_classify_doc_kind(title: str, url: str, expected: str) -> None:
-    """Documents are classified by title prefix, then filename, then keywords."""
-    assert classify_doc_kind(title, CDN + url) == expected
+def test_classify_doc_kind(title: str, url: str, snippet: str | None, expected: str) -> None:
+    """Title and filename decide the kind, the snippet is the fallback, and an SFCR is never an FCR."""
+    assert classify_doc_kind(title, url, snippet) == expected
 
 
-def test_original_upload_uses_last_timestamp_of_reuploaded_file() -> None:
-    """A re-uploaded file keeps its original upload time; untimestamped files have none."""
-    url = CDN + "2026-01-09-10-55-51-2023-09-22-16-25-47-Amendment-Rules-2024.pdf"
-    assert original_upload(url) == datetime(2023, 9, 22, 16, 25, 47)
-    assert original_upload(CDN + "Paper.pdf") is None
+def test_reporting_year_prefers_a_year_beside_the_report_name_over_an_upload_date() -> None:
+    """A filename upload date doesn't win over the year the report names."""
+    assert reporting_year("Document", "https://x.com/2025-04-30-FCR-2023.pdf", today=TODAY) == 2023
 
 
-def test_extract_emails() -> None:
-    """Submission addresses are found and lower-cased; missing notes give none."""
-    note = "Please email your comments to Policy@bma.bm by 15 December 2026."
-    assert extract_emails(note) == ["policy@bma.bm"]
-    assert extract_emails(None) == []
+def test_reporting_year_falls_back_to_the_snippet() -> None:
+    """When neither title nor filename has a year, the snippet's year-end is used."""
+    snippet = "Financial Condition Report for the year ended December 31, 2024"
+
+    assert reporting_year("Financial Condition Report", "https://x.com/report.pdf", snippet, today=TODAY) == 2024
 
 
-def test_curate_prefers_url_date_and_parses_deadline() -> None:
-    """The CDN upload date wins over the listed date, which is kept alongside."""
-    [doc] = curate(
+@pytest.mark.parametrize("title", ["FCR 2026", "FCR 2012", "Financial Condition Report"])
+def test_reporting_year_is_none_without_a_plausible_year(title: str) -> None:
+    """The current year can't be reported on yet, years before the disclosure rules are noise."""
+    assert reporting_year(title, "https://x.com/report.pdf", today=TODAY) is None
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Example Re Ltd. - Financial Condition Report 2024", "Example Re Ltd."),
+        ("Example Re, Ltd. | FCR | For the year ended 31 December 2022", "Example Re, Ltd."),
+        ("2024 Financial Condition Report", "Site Name"),
+    ],
+)
+def test_institution_is_the_title_before_the_report_name_else_the_site(title: str, expected: str) -> None:
+    """The institution comes from the title; a title that starts with the report's name falls back to the site."""
+    assert institution(title, "Site Name") == expected
+
+
+def test_curate_keeps_pdfs_only() -> None:
+    """Results that aren't PDFs can't be parsed, so they're dropped."""
+    documents = curate(
         [
-            raw(
-                "bma_11130",
-                "Consultation Paper - New Insurer Class",
-                "2026-01-21-14-43-53-Consultation-Paper.pdf",
-                uploaded_date="2026-02-27",
-                comment_deadline="2026-02-27",
-            )
-        ]
+            raw("a", "Example Re Ltd. FCR 2024", "https://x.com/a.pdf"),
+            raw("b", "Example Re Ltd. FCR 2024", "https://x.com/download?id=7"),
+        ],
+        today=TODAY,
     )
-    assert doc["published_date"] == date(2026, 1, 21)
-    assert doc["listed_date"] == date(2026, 2, 27)
-    assert doc["comment_deadline"] == date(2026, 2, 27)
+
+    assert [document["document_id"] for document in documents] == ["a"]
 
 
-def test_curate_drops_spreadsheets() -> None:
-    """Only PDFs survive curation."""
-    docs = curate(
+def test_curate_treats_an_extensionless_url_from_a_filetype_pdf_query_as_a_pdf() -> None:
+    """Google's filetype:pdf returns only PDFs, so a download link without .pdf is still kept."""
+    [document] = curate(
+        [raw("a", "Example Re Ltd. FCR 2024", "https://x.com/download?id=7", search_queries=["fcr filetype:pdf"])],
+        today=TODAY,
+    )
+
+    assert document["file_type"] == "pdf"
+
+
+def test_curate_keeps_one_fcr_per_institution_and_year_preferring_the_best_rank() -> None:
+    """The same FCR at two URLs on one domain is one document, the better-ranked one recording the other."""
+    documents = curate(
         [
-            raw("bma_1", "Consultation Paper - A", "2026-01-01-00-00-00-A.pdf"),
-            raw("bma_2", "Class 4 2024 BSCR", "2026-01-01-00-00-00-BSCR.xlsm"),
-        ]
+            raw("copy", "Example Re Ltd. FCR 2024", "https://x.com/cdn/a.pdf", search_rank=7),
+            raw("original", "Example Re Ltd. - Financial Condition Report 2024", "https://x.com/a.pdf"),
+        ],
+        today=TODAY,
     )
-    assert [d["document_id"] for d in docs] == ["bma_1"]
+
+    assert [(document["document_id"], document["superseded_ids"]) for document in documents] == [("original", ["copy"])]
 
 
-def test_curate_keeps_current_over_archived_duplicate() -> None:
-    """Of two same-titled documents the current one survives and records the other."""
-    docs = curate(
+def test_curate_keeps_each_year_and_each_institution_on_a_shared_domain() -> None:
+    """A group site hosting several subsidiaries' FCRs keeps one per subsidiary and year."""
+    documents = curate(
         [
-            raw(
-                "bma_8150",
-                "Consultation Paper - Proposed Enhancements",
-                "2023-07-28-16-11-59-CP.pdf",
-                is_archived=True,
-            ),
-            raw(
-                "bma_8326",
-                "Consultation Paper – Proposed Enhancements",
-                "2023-08-24-02-01-31-CP.pdf",
-            ),
-        ]
+            raw("re_2024", "Example Re Ltd. FCR 2024", "https://x.com/re-2024.pdf"),
+            raw("re_2023", "Example Re Ltd. FCR 2023", "https://x.com/re-2023.pdf"),
+            raw("ins_2024", "Example Insurance Ltd. FCR 2024", "https://x.com/ins-2024.pdf"),
+        ],
+        today=TODAY,
     )
-    assert [(d["document_id"], d["superseded_ids"]) for d in docs] == [("bma_8326", ["bma_8150"])]
+
+    assert {document["document_id"] for document in documents} == {"re_2024", "re_2023", "ins_2024"}
 
 
-def test_doc_kinds_lists_every_classification() -> None:
-    """DOC_KINDS covers each kind the classifier can produce, so download filters can be validated."""
-    produced = {kind for _, kind in DOC_KIND_PREFIXES} | {
-        "consultation_paper",
-        "discussion_paper",
-        "legislation",
-        "other",
-    }
+def test_curate_prefers_a_result_search_still_returns() -> None:
+    """A copy no longer returned by search loses to one that still is, whatever its rank."""
+    documents = curate(
+        [
+            raw("gone", "Example Re Ltd. FCR 2024", "https://x.com/old.pdf", is_listed=False),
+            raw("current", "Example Re Ltd. FCR 2024", "https://x.com/new.pdf", search_rank=9),
+        ],
+        today=TODAY,
+    )
 
-    assert produced == set(DOC_KINDS)
-
-
-def test_keep_doc_kinds_keeps_only_included_kinds_in_order() -> None:
-    """Papers of a listed kind are kept in their original order; every other kind is left out."""
-    papers = [
-        {"document_id": "bma_1", "doc_kind": "consultation_paper"},
-        {"document_id": "bma_2", "doc_kind": "notice"},
-        {"document_id": "bma_3", "doc_kind": "legislation"},
-        {"document_id": "bma_4", "doc_kind": "consultation_paper"},
-    ]
-
-    kept = keep_doc_kinds(papers, {"consultation_paper", "legislation"})
-
-    assert [p["document_id"] for p in kept] == ["bma_1", "bma_3", "bma_4"]
+    assert [document["document_id"] for document in documents] == ["current"]
 
 
-def test_keep_doc_kinds_rejects_empty_set() -> None:
-    """Keeping nothing would empty silver, so an empty set fails instead."""
+def test_keep_doc_kinds_filters_and_rejects_unknown_kinds() -> None:
+    """Only listed kinds are kept, and a misspelt kind fails rather than emptying silver."""
+    documents = [{"doc_kind": kind} for kind in DOC_KINDS]
+
+    assert keep_doc_kinds(documents, {"fcr"}) == [{"doc_kind": "fcr"}]
+    with pytest.raises(ValueError, match="Unknown"):
+        keep_doc_kinds(documents, {"fcrs"})
     with pytest.raises(ValueError, match="No doc_kinds"):
-        keep_doc_kinds([{"document_id": "bma_1", "doc_kind": "notice"}], set())
+        keep_doc_kinds(documents, set())
 
 
-def test_keep_doc_kinds_rejects_unknown_doc_kind() -> None:
-    """A misspelt kind fails loudly instead of silently dropping that kind's papers."""
-    with pytest.raises(ValueError, match="consultation_papers"):
-        keep_doc_kinds([], {"consultation_papers"})
+def test_keep_reported_since_drops_older_and_undated_documents() -> None:
+    """With a cutoff, only documents reporting on that year or later are kept; None keeps all."""
+    documents = [{"reporting_year": 2019}, {"reporting_year": 2020}, {"reporting_year": None}]
 
-
-def test_keep_published_since_keeps_cutoff_year_and_later_in_order() -> None:
-    """Papers from the cutoff year onward are kept in order; older and undated papers are left out."""
-    papers = [
-        {"document_id": "bma_1", "published_date": date(2024, 3, 1)},
-        {"document_id": "bma_2", "published_date": date(2019, 12, 31)},
-        {"document_id": "bma_3", "published_date": None},
-        {"document_id": "bma_4", "published_date": date(2020, 1, 1)},
-    ]
-
-    kept = keep_published_since(papers, 2020)
-
-    assert [p["document_id"] for p in kept] == ["bma_1", "bma_4"]
-
-
-def test_keep_published_since_none_keeps_everything() -> None:
-    """No cutoff keeps every paper, undated ones included."""
-    papers = [
-        {"document_id": "bma_1", "published_date": date(2001, 1, 1)},
-        {"document_id": "bma_2", "published_date": None},
-    ]
-
-    assert keep_published_since(papers, None) == papers
+    assert keep_reported_since(documents, 2020) == [{"reporting_year": 2020}]
+    assert keep_reported_since(documents, None) == documents

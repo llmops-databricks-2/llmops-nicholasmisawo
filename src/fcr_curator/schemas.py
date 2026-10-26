@@ -3,14 +3,12 @@
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
-    DateType,
     FloatType,
     IntegerType,
     LongType,
     StringType,
     StructField,
     StructType,
-    TimestampType,
 )
 
 # Rows as each source returns them (see sources/)
@@ -18,31 +16,38 @@ SOURCE_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
         StructField("title", StringType(), False),
-        StructField("summary", StringType(), True),
-        StructField("comment_deadline", StringType(), True),
-        StructField("uploaded_date", StringType(), True),
-        StructField("document_type", StringType(), True),
-        StructField("categories", ArrayType(StringType()), True),
-        StructField("topics", ArrayType(StringType()), True),
-        StructField("is_archived", BooleanType(), True),
-        StructField("is_stakeholder_letter", BooleanType(), True),
+        StructField("snippet", StringType(), True),
         StructField("pdf_url", StringType(), True),
-        StructField("view_url", StringType(), True),
-        StructField("download_url", StringType(), True),
-        StructField("related_documents", ArrayType(StringType()), True),
-        StructField("institution", StringType(), True),
+        StructField("displayed_link", StringType(), True),
+        StructField("site_name", StringType(), True),  # The result's site as Google names it
+        StructField("domain", StringType(), True),
+        StructField("search_queries", ArrayType(StringType()), True),  # Every query that found the URL, sorted
+        StructField("search_rank", IntegerType(), True),  # Best position across those queries, 1-based
         StructField("source", StringType(), True),
         StructField("ingestion_timestamp", StringType(), True),  # Ingest run that last inserted or changed the row
+    ]
+)
+
+# bronze_fcr_search_log: one row per billed SerpAPI search, append-only; search_plan reads it to skip
+# queries asked recently
+SEARCH_LOG_SCHEMA = StructType(
+    [
+        StructField("query", StringType(), False),
+        StructField("reason", StringType(), True),  # Why search_plan asked it: missing_year, institution, discovery
+        StructField("page_start", IntegerType(), True),  # Result offset of the page: 0, 10, ...
+        StructField("results", IntegerType(), True),
+        StructField("fcr_results", IntegerType(), True),  # Results whose title, filename or snippet look like an FCR
+        StructField("searched_at", StringType(), False),  # Ingest run that made the search (UTC ISO)
     ]
 )
 
 # Set by the bronze MERGE rather than by the source, so history survives re-runs
 BRONZE_TRACKING_FIELDS = [
     StructField("first_seen_at", StringType(), True),  # Ingest run that first inserted the row
-    StructField("is_listed", BooleanType(), True),  # False once the source stops listing the document
+    StructField("is_listed", BooleanType(), True),  # False once the latest search stops returning the URL
 ]
 
-# bronze_consultation_papers: every document any source has listed, as it returned them
+# bronze_fcr_documents: every search result any run has found, as the source returned it
 BRONZE_SCHEMA = StructType([*SOURCE_SCHEMA.fields, *BRONZE_TRACKING_FIELDS])
 
 # Curated metadata (see curation.curate), refreshed from bronze on every ingest
@@ -51,20 +56,16 @@ SILVER_METADATA_SCHEMA = StructType(
         StructField("document_id", StringType(), False),
         StructField("source", StringType(), True),
         StructField("institution", StringType(), True),
+        StructField("domain", StringType(), True),
         StructField("title", StringType(), False),
         StructField("doc_kind", StringType(), False),
         StructField("file_type", StringType(), True),
         StructField("file_url", StringType(), True),
-        StructField("published_date", DateType(), True),
-        StructField("listed_date", DateType(), True),
-        StructField("file_uploaded_at", TimestampType(), True),
-        StructField("comment_deadline", DateType(), True),
-        StructField("submission_note", StringType(), True),
-        StructField("submission_emails", ArrayType(StringType()), True),
-        StructField("topics", ArrayType(StringType()), True),
-        StructField("is_archived", BooleanType(), True),
+        StructField("reporting_year", IntegerType(), True),
+        StructField("snippet", StringType(), True),
+        StructField("search_queries", ArrayType(StringType()), True),
+        StructField("search_rank", IntegerType(), True),
         StructField("is_listed", BooleanType(), True),
-        StructField("related_documents", ArrayType(StringType()), True),
         StructField("superseded_ids", ArrayType(StringType()), True),
         StructField("ingestion_timestamp", StringType(), True),
         StructField("first_seen_at", StringType(), True),
@@ -77,10 +78,10 @@ STORAGE_FIELDS = [
     StructField("volume_path", StringType(), True),
 ]
 
-# silver_consultation_papers: curated papers plus where each file landed in the volume
+# silver_fcr_documents: curated FCRs plus where each file landed in the volume
 SILVER_SCHEMA = StructType([*SILVER_METADATA_SCHEMA.fields, *STORAGE_FIELDS])
 
-# silver_parsed_consultation_papers: ai_parse_document output for each downloaded silver paper, parsed once
+# silver_parsed_fcr_documents: ai_parse_document output for each downloaded silver FCR, parsed once
 PARSED_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
@@ -91,7 +92,7 @@ PARSED_SCHEMA = StructType(
     ]
 )
 
-# gold_consultation_paper_chunks: cleaned text chunks with the paper's metadata and an embedding, the RAG source
+# gold_fcr_chunks: cleaned text chunks with the FCR's metadata and an embedding, the RAG source
 CHUNKS_SCHEMA = StructType(
     [
         StructField("id", StringType(), False),  # <document_id>_<chunk_id>, the vector index primary key
@@ -100,14 +101,11 @@ CHUNKS_SCHEMA = StructType(
         StructField("page_id", IntegerType(), True),  # Page the chunk starts on, for citations
         StructField("text", StringType(), True),
         StructField("title", StringType(), True),
-        StructField("doc_kind", StringType(), True),
         StructField("institution", StringType(), True),
-        StructField("published_date", DateType(), True),
-        StructField("comment_deadline", DateType(), True),
-        StructField("topics", ArrayType(StringType()), True),
-        StructField("is_archived", BooleanType(), True),
+        StructField("domain", StringType(), True),
+        StructField("reporting_year", IntegerType(), True),
         StructField("file_url", StringType(), True),
-        StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that chunked the paper
+        StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that chunked the document
         StructField("embedding", ArrayType(FloatType()), True),
     ]
 )
