@@ -33,7 +33,7 @@ from pyspark.sql.functions import sum as spark_sum
 
 from fcr_curator.config import load_config
 from fcr_curator.data_processor import DataProcessor
-from fcr_curator.embeddings import gateway_client, gateway_embedder
+from fcr_curator.gateway import gateway_client, gateway_embedder
 
 # COMMAND ----------
 # Settings

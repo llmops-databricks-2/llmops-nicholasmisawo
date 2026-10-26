@@ -1,10 +1,10 @@
-"""Tests for embedding chunk text through a Unity Gateway model service."""
+"""Tests for calling Unity Gateway model services: embeddings and JSON chat replies."""
 
 from types import SimpleNamespace
 
 import pytest
 
-from fcr_curator.embeddings import embed_texts, gateway_embedder
+from fcr_curator.gateway import chat_json, embed_texts, gateway_embedder
 
 
 def length_embedder(calls: list[list[str]]) -> object:
@@ -56,3 +56,18 @@ def test_gateway_embedder_orders_vectors_by_their_index_and_names_the_model_serv
 
     assert vectors == [[1.0], [2.0]]
     assert requests == [{"model": "course_ops.gateway.embed", "input": ["first", "second"]}]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ['{"ranking": [2, 1]}', 'Here you go:\n```json\n{"ranking": [2, 1]}\n```'],
+)
+def test_chat_json_reads_the_object_even_when_wrapped_in_text(reply: str) -> None:
+    """A JSON object is found whether or not the model added prose or a code fence around it."""
+    assert chat_json(lambda instructions, message: reply, "i", "m") == {"ranking": [2, 1]}
+
+
+def test_chat_json_fails_with_the_reply_when_there_is_no_json() -> None:
+    """A reply with no JSON object raises an error that quotes it, so the failure can be diagnosed."""
+    with pytest.raises(ValueError, match="I cannot help"):
+        chat_json(lambda instructions, message: "I cannot help with that", "i", "m")

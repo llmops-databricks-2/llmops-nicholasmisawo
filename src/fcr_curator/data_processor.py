@@ -22,7 +22,7 @@ from pyspark.sql.functions import col, concat_ws, explode, expr, lit, regexp_rep
 from fcr_curator.chunking import Chunk, element_chunks, section_chunks
 from fcr_curator.config import ProjectConfig
 from fcr_curator.download import processed_stamp
-from fcr_curator.embeddings import EmbedBatch, embed_texts
+from fcr_curator.gateway import EmbedBatch, embed_texts
 from fcr_curator.schemas import CHUNKS_SCHEMA, EMBEDDED_CHUNKS_SCHEMA, EMBEDDING_FIELD, PARSED_SCHEMA
 from fcr_curator.tables import KEY, ensure_table, record_embeddings_sql
 
@@ -47,7 +47,7 @@ EMBED_SAVE_BATCH = 2000
 class DataProcessor:
     """Runs parse -> chunk -> embed over silver, never repeating work.
 
-    embed embeds a batch of texts (see embeddings.gateway_embedder); None skips embedding.
+    embed embeds a batch of texts (see gateway.gateway_embedder); None skips embedding.
     """
 
     def __init__(self, spark: SparkSession, config: ProjectConfig, embed: EmbedBatch | None = None) -> None:
