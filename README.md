@@ -59,7 +59,7 @@ One job, `fcr_pipeline-<target>`, runs the stages in order; each task starts onl
 |---|---|---|---|
 | `bronze_fcr_documents` | `01_ingestion/bronze_fcr_documents.py` | `bronze_fcr_documents` | — |
 | `silver_fcr_documents` | `01_ingestion/silver_fcr_documents.py` | `silver_fcr_documents` | `fcr_documents/<source>/` (only when `DOWNLOAD_FILES = True`) |
-| `process_fcr_documents` | `02_processing/process_fcr_documents.py` | `silver_parsed_fcr_documents`, `gold_fcr_chunks` | — (reads the silver downloads) |
+| `process_fcr_documents` | `02_processing/process_fcr_documents.py` | `silver_parsed_fcr_documents`, `gold_fcr_chunks`, `gold_fcr_chunks_by_section` | — (reads the silver downloads) |
 
 The job runs weekly, Mondays at 06:00 Bermuda time (`Atlantic/Bermuda`). The schedule is paused in `dev` and `acc` and active in `prd`, set by the `schedule_pause_status` bundle variable in `databricks.yml`; the usage policy comes from the `usage_policy_id` variable. Run it by hand with:
 
@@ -118,14 +118,15 @@ Each download is checked for a PDF header; a file that isn't one (a landing or l
 | `bronze_fcr_search_log` | bronze | One row per billed SerpAPI search: query, reason, page, results and FCR-like results; append-only | Bronze task |
 | `silver_fcr_documents` | silver | Curated FCRs: PDFs only, classified, one per institution and year, filtered to `INCLUDED_DOC_KINDS` reporting on `MIN_REPORTING_YEAR` or later, plus `processed` and `volume_path` | Silver task |
 | `silver_parsed_fcr_documents` | silver | `ai_parse_document` output (as JSON) for each downloaded FCR, parsed once | Process task |
-| `gold_fcr_chunks` | gold | Cleaned text and table chunks with page and document metadata, not yet embedded; Change Data Feed on for a Vector Search index | Process task |
+| `gold_fcr_chunks` | gold | Chunking strategy 1: one chunk per parsed text or table element, with page and document metadata; not yet embedded; Change Data Feed on | Process task |
+| `gold_fcr_chunks_by_section` | gold | Chunking strategy 2: one chunk per section (like Unstructured's `by_title`), each starting with its heading, up to 2,000 characters; tables split by rows; not yet embedded; Change Data Feed on | Process task |
 
 Each table carries a `COMMENT` and a `quality` table property (`bronze` / `silver` / `gold`), so its layer shows in Catalog Explorer. All are updated incrementally rather than overwritten, so runs are safe to repeat:
 
 - **Bronze** inserts new results and updates only rows whose content changed or that a new query found; `search_queries` keeps every query that ever found the row. A new run timestamp or a new `search_rank` alone is not a change, since Google reorders results between runs, so unchanged rows and their `first_seen_at` are left alone. A run asks only some queries, so a row is marked `is_listed = false` only when every one of its queries was asked again and none returned it; it flips back if it reappears.
 - **Silver** is re-curated from all of bronze each run (deduplication needs every document) and upserted the same way. Its `MERGE` never writes `processed` or `volume_path`, so downloads survive re-ingestion. Documents that no longer survive curation are removed from silver; any file already downloaded for them stays in the volume.
 - **Downloads**, when enabled, fetch only rows with no `volume_path` and skip files already in the volume.
-- **Processing** parses only downloaded documents not yet in `silver_parsed_fcr_documents` and chunks only parsed documents not yet in `gold_fcr_chunks`, so each FCR is parsed and chunked once. Parsed rows and chunks of documents silver no longer holds are deleted, so retrieval never answers from a superseded duplicate.
+- **Processing** parses only downloaded documents not yet in `silver_parsed_fcr_documents` and chunks only parsed documents not yet in each chunk table, so each FCR is parsed once and chunked once per strategy. Parsed rows and chunks of documents silver no longer holds are deleted, so retrieval never answers from a superseded duplicate.
 
 ### Bronze table schema: `bronze_fcr_documents`
 
@@ -247,7 +248,8 @@ llmops-nicholasmisawo/
 │   └── fcr_curator/
 │       ├── config.py
 │       ├── curation.py        # rules that turn bronze results into silver FCRs
-│       ├── data_processor.py  # parse and chunk downloaded FCRs
+│       ├── chunking.py        # the two chunking strategies: per element and per section
+│       ├── data_processor.py  # parse downloaded FCRs and chunk them with every strategy
 │       ├── download.py        # download curated FCRs into the volume
 │       ├── http_client.py     # retrying HTTP session and file download
 │       ├── schemas.py         # Spark schemas of the medallion tables
@@ -266,9 +268,9 @@ llmops-nicholasmisawo/
 ├── tests/
 │   ├── fixtures/
 │   ├── conftest.py
+│   ├── test_chunking.py
 │   ├── test_config.py
 │   ├── test_curation.py
-│   ├── test_data_processor.py
 │   ├── test_download.py
 │   ├── test_schemas.py
 │   ├── test_search_plan.py
@@ -290,7 +292,7 @@ llmops-nicholasmisawo/
 
 - `src/fcr_curator/`: reusable Python package for configuration (including the assistant system prompt), sources, curation rules, downloads, table schemas and MERGEs, and application logic. Notebooks stay lean and import from it; a new source goes in `sources/<name>.py` and returns rows matching `SOURCE_SCHEMA`.
 - `notebooks/01_ingestion/`: FCR discovery and curation pipelines.
-- `notebooks/02_processing/`: PDF parsing with `ai_parse_document` and chunk cleaning (`data_processor.py`).
+- `notebooks/02_processing/`: PDF parsing with `ai_parse_document`, chunking with both strategies in `chunking.py`, and a side-by-side comparison of their chunk sizes.
 - `notebooks/03_rag/`: planned retrieval-augmented generation workflows.
 - `notebooks/04_evaluation/`: planned model evaluation, tracing, and monitoring using MLflow.
 - `resources/`: Databricks Asset Bundle job definitions, kept separate from the notebooks: one scheduled pipeline job.
