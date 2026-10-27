@@ -39,7 +39,8 @@ uv run python -c "from databricks.sdk import WorkspaceClient; from fcr_curator.c
 
 ## Findings
 
-- **Synced in full**: `fcr_knowledge_base_lakebase_dev` holds 20,768 chunks from 58 companies, every one with a `vector(1024)` embedding, keyed by `source_key`. Citations open the cited page (`…FCR-2024.pdf#page=15`).
+- **Synced in full**: `fcr_knowledge_base_lakebase_dev` holds 14,192 chunks from 44 listed insurers, the same as the Delta table, every one with a `vector(1024)` embedding and its licence class, keyed by `source_key`. Citations open the cited page (`…FCR-2024.pdf#page=15`).
+- **Changes reach Lakebase as changes**: filling in `classification` updated every row through the Change Data Feed without re-embedding anything, and chunks of FCRs that left the register were deleted the same way.
 - **The first copy outlasts the job**: creating a synced table returns before the initial snapshot finishes, so the first copy took about 15 minutes after the job reported success.
 - **Needs pgvector**: without the extension the sync fails with `REQUIRED_EXTENSION_NOT_INSTALLED`, hence the one-time setup above.
 - **psycopg stays out of jobs**: loading `psycopg`'s compiled library aborts Python on serverless job compute. The sync only needs the Databricks SDK, so `lakebase.py` imports `psycopg` only inside `connect()`, which jobs never call. Anything that queries Postgres (search) runs from a laptop.

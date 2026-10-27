@@ -20,7 +20,9 @@ env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python
 
 ## Findings: what each step changed
 
-Question: *"How did Wilton Re's solvency ratio compare with its capital requirement in 2024?"*
+Question: *"How did Wilton Re's solvency ratio compare with its capital requirement in 2024?"*, asked
+before the entity list, when the index also held other companies' reports. Wilton's FCRs are now
+registered as Wilton Reinsurance Bermuda Limited, which the `Wilton Re` filter still finds.
 
 | Step | Top results | What it shows |
 |---|---|---|
@@ -39,7 +41,7 @@ Wilton Re's 2024 cover was about 245%.
 
 - **The reranker first dropped every chunk.** Wilton Re never states a ratio, only the figures to work it out from, and "leave out excerpts that don't help" was read strictly. The prompt now counts excerpts holding the figures needed as useful.
 - **Results vary slightly between runs**, because the chat model isn't deterministic: the rewritten text and the number of reranked hits changed. Setting `temperature=0` is untested.
-- **EU/UK reports in the index** show up whenever filters are off (see [03 Data pipeline](03-data-pipeline.md#findings)).
+- **EU/UK reports were in the index** and showed up whenever filters were off. The entity list has since removed them ([03 Data pipeline](03-data-pipeline.md#the-entity-list)).
 
 ## Testing from the UI
 
@@ -52,6 +54,7 @@ returns the company, reporting year, an excerpt and the `citation_url` that open
 | 2. The question's embedding, to copy | Databricks SQL editor | A list of 1,024 numbers |
 | 3. Keyword, filtered | Lakebase SQL editor | Eligible Capital text, page 15 |
 | 4. Hybrid (RRF), with the vector from query 2 pasted in | Lakebase SQL editor | Regulatory Capital Requirements chunks, page 16 |
+| 5. Keyword, limited to a licence class (`Class 4`) | Lakebase SQL editor | Class 4 insurers' catastrophe risk passages |
 
 The Databricks SQL editor can embed a question because `system.ai.gte-large-en` is the same model as
 `course_ops.gateway.embed`: the same sentence through both gave cosine similarity 1.0. Query rewriting,

@@ -1,9 +1,9 @@
-# dbt transformations of the FCR Curator, laid out like dbt Labs' jaffle-logistics example:
-#   staging       one model per landed source, lightly cleaned                  (bronze)
-#   intermediate  curation into the register, and joins across sources          (silver)
+# dbt transformations of the FCR Curator, one folder per layer:
+#   staging       one model per landed source or seed, lightly cleaned; the entity list  (bronze)
+#   intermediate  the current search results, curation into the register        (bronze)
 #   context       the chunking chain: parse, hash, chunk, attach metadata       (silver)
 #   context/ai    embeddings and the knowledge base the assistant serves        (gold)
-#   marts         the register the Python tasks read, and coverage by company   (gold)
+#   marts         the search plan and register the Python tasks read, and coverage by insurer (gold)
 # Python only does what dbt can't - call SerpAPI, read disclosures pages, download PDFs - and appends
 # what it saw to the landed tables dbt defines (models/staging/_sources.yml).
 name: fcr_curator

@@ -7,7 +7,7 @@ workspace and handles every company's layout, which is why it was chosen over Py
 pdfplumber (needs tuning per template) and Unstructured.io (its accurate mode needs system packages
 serverless can't install; its hosted API sends documents outside the workspace).
 
-What the parser found across the 78 FCRs:
+What the parser found across the first 78 FCRs:
 
 | Element | Count | Used? |
 |---|---|---|
@@ -28,11 +28,14 @@ What the parser found across the 78 FCRs:
    - a section under 200 characters merges into the next
    - tables get chunks of their own, split by rows with the header row repeated
 
-Every chunk carries its FCR's `registered_name`, the insurer's `fcr_class` and `business`, `institution`, `reporting_year`, `domain`, `title`,
-`file_url` and `page_id` (counted from 0, as the parser numbers pages). Every run reads this metadata
-fresh from the register, so a better name or a corrected year reaches chunks written earlier.
+Every chunk carries its FCR's `registered_name`, the insurer's `fcr_class` and `business`,
+`institution`, `reporting_year`, `domain`, `title`, `file_url` and `page_id` (counted from 0, as the
+parser numbers pages). Every run reads this metadata fresh from the register, so a better name or a
+corrected year reaches chunks written earlier.
 
 ## Findings: the comparison
+
+Measured on the first 78 FCRs, before the entity list narrowed the register.
 
 | | Per element | **Per section** |
 |---|---|---|

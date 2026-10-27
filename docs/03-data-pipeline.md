@@ -1,7 +1,8 @@
 # 03 Data pipeline
 
-Bermuda insurers and reinsurers publish their FCRs on their own websites, so there's no single listing to scrape. The
-pipeline finds them with Google search (through SerpAPI), curates the results, and downloads the PDFs.
+Bermuda insurers and reinsurers publish their FCRs on their own websites, so there's no single listing
+to scrape. The pipeline finds them with Google search (through SerpAPI), curates the results, and
+downloads the PDFs.
 
 ## The job
 
@@ -96,14 +97,19 @@ company's own styling (DaVinci, AmTrust, Lloyd's). The 20 companies first search
 into it: 17 map to 37 licensed entities; Validus and Ironshore were acquired, and Fidelis has no
 in-scope licence, so they dropped out.
 
-**Telling sister companies apart.** A group's companies share its website, so a domain narrows an FCR
-down to the group and its name decides the company; an exact name beats a longer one that starts the
-same, so RenaissanceRe Group's own FCR stays the group's. An FCR on a shared domain that names no
-company is left out rather than guessed. Off the group's website, the FCR must name the insurer in full
-or shortened ("Everest Re"): a longer name is another company, such as PartnerRe's Irish subsidiaries,
-whose Solvency II reports on centralbank.ie the first search run had credited to PartnerRe Group. And
-a listed insurer has one FCR per year, wherever it's hosted. The BMA lists some groups under their insurer's name ("Nissan
-Global Reinsurance, Ltd. (Group)"); an FCR either could have filed goes to the insurer.
+**Matching an FCR to an insurer** (`reference.py`):
+
+- **On a group's website**, the domain narrows the FCR down to the group, and its name decides the
+  company. An exact name beats a longer one that starts the same, so RenaissanceRe Group's own FCR
+  stays the group's. An FCR that names none of the group's companies is left out rather than guessed.
+- **Elsewhere**, the FCR must name the insurer in full or shortened ("Everest Re"). A longer name is
+  another company: PartnerRe's Irish subsidiaries, whose Solvency II reports on centralbank.ie the first
+  search run had credited to PartnerRe Group.
+- **Where the name is**: the title before the report's name, else the site's name, and also the title
+  after it, since some insurers write "FINANCIAL CONDITION REPORT - Wilton Re Bermuda".
+- **Same-named groups**: the BMA lists some groups under their insurer's name ("Nissan Global
+  Reinsurance, Ltd. (Group)"); an FCR either could have filed goes to the insurer.
+- **One FCR per insurer and year**, wherever it's hosted.
 
 | Finding | |
 |---|---|
@@ -112,7 +118,7 @@ Global Reinsurance, Ltd. (Group)"); an FCR either could have filed goes to the i
 | First search of the list | 150 searches, 1,305 results, 517 FCR-like; 107 of the searches found something FCR-like |
 | After it | **86 FCRs from 45 of the 194 insurers**, one per insurer and year, 83 downloaded; 14,192 chunks from 44 insurers in the knowledge base and Lakebase, each with its licence class |
 | Coverage by class | Groups 19 of 33 · Class 4 10 of 46 · Long Term E 13 of 83 · Class 3B 3 of 32 |
-| Names after the report's | Some titles name the insurer last ("FINANCIAL CONDITION REPORT - Wilton Re Bermuda"), so that part of the title is matched too; it brought back Wilton Reinsurance Bermuda's FCRs and gave Athora Life Re its own, instead of Athora Group's |
+| Names after the report's | Matching the title after the report's name brought back Wilton Reinsurance Bermuda's FCRs and gave Athora Life Re its own, instead of Athora Group's |
 
 ## Disclosures pages (`sources/pages.py`)
 
@@ -143,8 +149,8 @@ dbt's `int_fcr_register` model re-curates all the search results each run:
 - **Excluded sites**: `bma.bm` and `.gov` (with subdomains), in curation and as `-site:` in queries.
 - **What it is**: "Financial Condition Report" and "Solvency and Financial Condition Report" (FCR / SFCR) are the same report in Bermuda, so either name in the title, filename or snippet makes a result an `fcr`.
 - **Reporting year**: a year beside the report's name wins over others, such as an upload date in a filename. Years before 2016 (when disclosure began) and the current year are ignored.
-- **Institution**: the title before the report's name, else the site's name.
-- **One per (re)insurer and year**: duplicates on a domain are merged, keeping one that search still returns, then the best-ranked; the others' ids go in `superseded_ids`.
+- **Institution**: the title before the report's name, else the site's name (matching also reads the title after it).
+- **One per insurer and year**: copies of a listed insurer's FCR for a year are merged wherever they're hosted, keeping one that search still returns, then the best-ranked; the others' ids go in `superseded_ids`.
 - **Entity name**: each FCR is matched to the entity list, by domain and name ([how](#the-entity-list)), and named after its insurer in `registered_name`. FCRs matching no listed insurer are left out of the register.
 - **Kept for the register**: `INCLUDED_DOC_KINDS = {"fcr"}`, reporting on 2020 or later.
 
@@ -178,7 +184,9 @@ Re-runs are safe, and each costs only what's new:
 - **Downloads** fetch only files missing from the volume; the volume is the record of what's downloaded, and dbt reads it. Each attempt is appended, so `fcr_register` shows an FCR that keeps failing.
 - **Parsing** is incremental: only FCRs not yet parsed are, and `full_refresh: false` stops even `dbt build --full-refresh` from parsing every PDF again. A parse stays when its FCR leaves the register, so an FCR that comes back isn't parsed twice.
 
-## Findings
+## Findings: the first runs, before the entity list
+
+These two runs searched the 20 brands first listed by hand, and kept FCRs of any company.
 
 | Run | Searches | Result |
 |---|---|---|
@@ -188,5 +196,5 @@ Re-runs are safe, and each costs only what's new:
 - **Targeting works**: the 11 `site:` searches for known (re)insurers found 41 FCR-like results, nearly 4 per search.
 - **Junk queries cost one page**: `"financial condition report" Bermuda 2024` returned 10 off-topic results (a Facebook post, audited accounts). It stopped after one page and now waits 90 days.
 - **False positives found by spot checks**, and excluded since: the New York State Comptroller's own "Financial Condition Report" (`.gov`) and pages from `bma.bm`.
-- **EU/UK reports got in**: Steamship Mutual, Lloyd's, Vienna Insurance Group and HSBC publish Solvency II SFCRs, which the "both names count" rule admits. A Bermuda check (for example "BSCR" or "Bermuda" in the text) would keep them out; not done yet.
+- **EU/UK reports got in**: Steamship Mutual, Lloyd's, Vienna Insurance Group and HSBC publish Solvency II SFCRs, which the "both names count" rule admits. The entity list now keeps out any company the BMA doesn't license in scope.
 - **Coverage by year**: 2025: 33 · 2024: 26 · 2023: 18 · 2020–2022: 4.

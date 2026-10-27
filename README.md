@@ -35,10 +35,10 @@ Python does only what dbt can't: calling SerpAPI, reading disclosures pages and 
 appends what it saw to tables dbt defines, never updating a row; dbt plans the searches and works out
 everything else.
 
-One weekly job runs everything up to Lakebase. Search runs on demand. The entity list is the BMA's
-licensed Class 4, Long Term E, Class 3B and group insurers; every FCR kept is named after one of them,
-and every citation opens the PDF at the cited page. The design
-and what we found at each stage are in [`docs/`](docs/README.md):
+One weekly job runs everything up to Lakebase; search runs on demand. The entity list is the BMA's
+licensed Class 4, Long Term E, Class 3B and group insurers: every FCR kept is named after one of them,
+and every citation opens the PDF at the cited page. The design, and what we found at each stage, are in
+[`docs/`](docs/README.md):
 
 | Doc | Covers |
 |---|---|
@@ -90,7 +90,7 @@ src/fcr_curator/     the package: search planning, sources, curation, downloads,
 notebooks/
   01_ingestion/      search_fcrs (SerpAPI and pages), download_fcrs
   02_retrieval/      sync to Lakebase, search walkthrough, UI search queries (search_examples.sql)
-dbt/                 dbt project (own environment): reference seed, curation, parsing, chunking, embeddings, marts
+dbt/                 dbt project (own environment): BMA seeds, search plan, curation, parsing, chunking, embeddings
 resources/           the bundle's job definition
 tests/               unit tests, one file per module
 docs/                design and findings
