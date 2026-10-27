@@ -63,3 +63,6 @@ mlartifacts/
 # Temporary files
 *.tmp
 *.bak
+
+# The hand-copied BMA list: it holds contact people, so only the seed made from it is committed
+dbt/seeds/raw_list_of_insurance_entities.txt

@@ -6,15 +6,15 @@ from fcr_curator.search import SearchHit
 
 def hit(hit_id: str, chars: int) -> SearchHit:
     """Build a hit whose text is chars long."""
-    return SearchHit(hit_id, "x" * chars, "Example Re", 2024, 4, "https://x.com/a.pdf")
+    return SearchHit(hit_id, "x" * chars, "Example Re", 2024, 5, "https://x.com/a.pdf#page=5")
 
 
-def test_cite_names_institution_year_printed_page_and_source() -> None:
-    """A source shows its number, institution, FCR year, page counted from 1, and URL."""
+def test_cite_names_company_year_page_and_a_link_to_that_page() -> None:
+    """A source shows its number, company, FCR year and page, and links to that page of the PDF."""
     cited = cite(2, hit("a", 3))
 
     assert cited.startswith("[2] Example Re, FCR 2024, page 5\n")
-    assert cited.endswith("Source: https://x.com/a.pdf")
+    assert cited.endswith("Source: https://x.com/a.pdf#page=5")
 
 
 def test_context_stays_within_the_token_budget() -> None:

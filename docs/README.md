@@ -1,13 +1,15 @@
 # Docs
 
-How the FCR Curator works and what we found building it, in pipeline order. Each page explains a stage,
-then records the findings from running it on real FCRs.
+How the FCR Curator works and what we found building it, in reading order: the setup, the map of the
+layers, each pipeline stage from finding FCRs to answering questions, then the context engineering that
+spans them. Each stage page explains how it works, then records the findings from running it on real FCRs.
 
 | Page | Covers |
 |---|---|
-| [01 Data pipeline](01-data-pipeline.md) | Finding FCRs with SerpAPI on a search budget, curating them, the medallion tables |
-| [02 Chunking](02-chunking.md) | Parsing, the two chunking strategies compared, chunk boundaries, the embedding window |
-| [03 Lakebase](03-lakebase.md) | Embeddings and the Lakebase synced table |
-| [04 Search](04-search.md) | Semantic, filtered, keyword and hybrid search, reranking, query rewriting, the token budget |
-| [Context engineering](context-engineering.md) | Every strategy that controls what reaches the model, and where it lives |
-| [Environment](environment.md) | Provisioned resources, model services, environments and CI |
+| [01 Environment](01-environment.md) | Provisioned resources, model services, environments and CI |
+| [02 Layers and dbt](02-layers-and-dbt.md) | The layers, the dbt models and where the dbt context engineering package is used |
+| [03 Data pipeline](03-data-pipeline.md) | The job, finding FCRs on a search budget and on disclosures pages, curation, the raw tables |
+| [04 Chunking](04-chunking.md) | Parsing, the two chunking strategies compared, chunk boundaries, the embedding window |
+| [05 Lakebase](05-lakebase.md) | Embeddings and the Lakebase copy of the knowledge base |
+| [06 Search](06-search.md) | Semantic, filtered, keyword and hybrid search, reranking, query rewriting, the token budget |
+| [07 Context engineering](07-context-engineering.md) | Every strategy that controls what reaches the model, and where it lives |

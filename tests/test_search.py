@@ -1,16 +1,11 @@
 """Tests for searching the synced FCR chunks: filters, keyword queries and rank fusion."""
 
-from fcr_curator.search import SearchFilters, SearchHit, any_word_query, institution_key, reciprocal_rank_fusion
+from fcr_curator.search import SearchFilters, SearchHit, any_word_query, reciprocal_rank_fusion
 
 
 def hit(hit_id: str) -> SearchHit:
     """Build a search hit with only an id that matters."""
-    return SearchHit(hit_id, "text", "Example Re", 2024, 0, "https://x.com/a.pdf")
-
-
-def test_institution_key_matches_names_however_they_are_written() -> None:
-    """Case, punctuation, spacing and legal suffixes don't change the key."""
-    assert institution_key("Wilton Re Ltd.") == institution_key("wilton re") == "wiltonre"
+    return SearchHit(hit_id, "text", "Example Re", 2024, 1, "https://x.com/a.pdf#page=1")
 
 
 def test_filters_without_values_match_everything() -> None:
@@ -25,6 +20,14 @@ def test_filters_match_institution_loosely_and_year_exactly() -> None:
     _, params = SearchFilters(institution="Wilton Re Ltd.", reporting_year=2024).where()
 
     assert params == ["%wiltonre%", 2024]
+
+
+def test_a_class_filter_matches_the_knowledge_bases_classification_exactly() -> None:
+    """A licence class limits search to chunks of insurers holding it, compared as given."""
+    where, params = SearchFilters(fcr_class="Class 4").where()
+
+    assert "classification = %s" in where.as_string(None)
+    assert params == ["Class 4"]
 
 
 def test_any_word_query_matches_any_word_and_drops_punctuation() -> None:

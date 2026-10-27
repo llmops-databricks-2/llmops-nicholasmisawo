@@ -22,7 +22,7 @@ Leave out only excerpts that are unrelated to the question."""
 
 def _candidates(hits: list[SearchHit]) -> str:
     return "\n\n".join(
-        f"[{number}] {hit.institution} FCR {hit.reporting_year}\n{hit.text[:EXCERPT_CHARS]}"
+        f"[{number}] {hit.company} FCR {hit.reporting_year}\n{hit.text[:EXCERPT_CHARS]}"
         for number, hit in enumerate(hits, start=1)
     )
 

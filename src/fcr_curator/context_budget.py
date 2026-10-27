@@ -30,9 +30,9 @@ def estimate_tokens(text: str) -> int:
 
 
 def cite(number: int, hit: SearchHit) -> str:
-    """Return a hit as a numbered, citable source: institution, year, page and URL."""
+    """Return a hit as a numbered, citable source: company, year, page and a link to that page."""
     page = f", page {hit.page}" if hit.page is not None else ""
-    return f"[{number}] {hit.institution}, FCR {hit.reporting_year}{page}\n{hit.text}\nSource: {hit.file_url}"
+    return f"[{number}] {hit.company}, FCR {hit.reporting_year}{page}\n{hit.text}\nSource: {hit.citation_url}"
 
 
 def build_context(hits: list[SearchHit], max_tokens: int = DEFAULT_MAX_TOKENS) -> Context:

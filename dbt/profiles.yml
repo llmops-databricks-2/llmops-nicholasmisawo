@@ -1,0 +1,19 @@
+# Local runs sign in with your browser (OAuth); the Databricks dbt task makes its own profile instead.
+# Catalogs and schema match project_config.yml.
+fcr_curator:
+  target: dev
+  outputs:
+    dev: &defaults
+      type: databricks
+      host: "{{ env_var('DBT_DATABRICKS_HOST', 'dbc-88df4c2c-4033.cloud.databricks.com') }}"
+      http_path: /sql/1.0/warehouses/0e56acba898dad4a
+      auth_type: oauth
+      catalog: llmops_dev
+      schema: nicholasmisawo
+      threads: 4
+    acc:
+      <<: *defaults
+      catalog: llmops_acc
+    prd:
+      <<: *defaults
+      catalog: llmops_prd

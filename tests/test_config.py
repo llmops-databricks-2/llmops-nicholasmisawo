@@ -14,7 +14,7 @@ def test_project_config_loads_for_dev() -> None:
     """Load the provisioned settings without requiring optional lecture resources."""
     cfg = ProjectConfig.from_yaml(str(PROJECT_CONFIG), "dev")
 
-    assert cfg.full_volume_path == "llmops_dev.nicholasmisawo.fcr_documents"
+    assert (cfg.full_schema_name, cfg.volume) == ("llmops_dev.nicholasmisawo", "fcr_documents")
     assert cfg.warehouse_id == "0e56acba898dad4a"
 
 

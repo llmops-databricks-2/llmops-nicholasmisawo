@@ -1,14 +1,18 @@
 # FCR Pipeline
 #
-# One job running the medallion stages in order, each task starting only
-# once the one before it succeeds:
+# One job running the stages in order, each task starting only once the one
+# before it succeeds. Python only talks to the outside world and appends what
+# it saw; dbt builds everything else:
 #
-#   bronze_fcr_documents   search for FCRs with SerpAPI and upsert bronze
-#   silver_fcr_documents   curate bronze into silver, download new PDFs
-#   process_fcr_documents  parse, chunk and embed newly downloaded FCRs
-#   sync_fcr_chunks_to_lakebase  create or refresh the Lakebase synced table of the chunks
+#   dbt_search_plan           load the reference list (seed), plan the searches due -> fcr_search_plan
+#   search_fcrs               ask the plan within budget, read the disclosures pages; append what was found
+#   dbt_register              work out the search results, curate them into fcr_register
+#   download_fcrs             download the register's new PDFs; appends every attempt
+#   dbt_context               parse the new PDFs (ai_parse_document), section chunks, embeddings
+#                             -> fcr_knowledge_base, plus dim_fcr_entities (FCR coverage per listed insurer)
+#   sync_knowledge_base_to_lakebase  create or refresh the Lakebase copy of fcr_knowledge_base
 #
-# Every stage is incremental, so re-runs only pick up new or changed FCRs.
+# Every stage is incremental or append-only, so re-runs only pick up new or changed FCRs.
 # A single stage can still be run on its own from the job page by choosing
 # that task when starting a run.
 #
@@ -26,14 +30,16 @@ resources:
   jobs:
     fcr_pipeline:
       name: fcr_pipeline-${bundle.target}
+      # One run at a time: every run writes the same tables, so a second start queues until the first ends
+      max_concurrent_runs: 1
       schedule:
         quartz_cron_expression: "0 0 6 ? * MON"
         timezone_id: "Atlantic/Bermuda"
         pause_status: ${var.schedule_pause_status}
       budget_policy_id: ${var.usage_policy_id}
-      # Passed to every task's notebook as a widget. dry_run=true makes bronze print its search plan
+      # Passed to every task's notebook as a widget. dry_run=true makes search_fcrs print its search plan
       # and budget without spending any SerpAPI searches, e.g.
-      #   databricks bundle run fcr_pipeline -t dev --only bronze_fcr_documents --params dry_run=true
+      #   databricks bundle run fcr_pipeline -t dev --only dbt_search_plan,search_fcrs --params dry_run=true
       parameters:
         - name: env
           default: ${bundle.target}
@@ -45,30 +51,83 @@ resources:
             environment_version: "6"
             dependencies:
               - ../dist/*.whl
+        # dbt has its own environment: dbt-databricks pins a databricks-sdk the wheel can't share
+        - environment_key: dbt
+          spec:
+            environment_version: "6"
+            dependencies:
+              - dbt-databricks>=1.10,<2
 
       tasks:
-        - task_key: bronze_fcr_documents
-          environment_key: default
-          notebook_task:
-            notebook_path: ../notebooks/01_ingestion/bronze_fcr_documents.py
+        # dbt tasks run the dbt/ folder this bundle uploads, on the SQL warehouse; Databricks writes the
+        # dbt profile for them from warehouse_id, catalog and schema (dbt/profiles.yml is for local runs).
+        # Their Python models install the deployed wheel (its version comes from version.txt).
+        # The plan reads the register as the searches so far make it, so this also rebuilds the register
+        - task_key: dbt_search_plan
+          environment_key: dbt
+          dbt_task:
+            source: WORKSPACE
+            project_directory: ../dbt
+            commands:
+              - dbt deps
+              - >-
+                dbt build --select +fcr_search_plan
+                --vars '{fcr_curator_wheel: ${workspace.artifact_path}/.internal/fcr_curator-0.0.1-py3-none-any.whl}'
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.schema}
 
-        - task_key: silver_fcr_documents
+        - task_key: search_fcrs
           depends_on:
-            - task_key: bronze_fcr_documents
+            - task_key: dbt_search_plan
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/01_ingestion/silver_fcr_documents.py
+            notebook_path: ../notebooks/01_ingestion/search_fcrs.py
 
-        - task_key: process_fcr_documents
+        # The register again, now with this run's searches
+        - task_key: dbt_register
           depends_on:
-            - task_key: silver_fcr_documents
-          environment_key: default
-          notebook_task:
-            notebook_path: ../notebooks/02_processing/process_fcr_documents.py
+            - task_key: search_fcrs
+          environment_key: dbt
+          dbt_task:
+            source: WORKSPACE
+            project_directory: ../dbt
+            commands:
+              - dbt deps
+              - >-
+                dbt build --select +fcr_register
+                --vars '{fcr_curator_wheel: ${workspace.artifact_path}/.internal/fcr_curator-0.0.1-py3-none-any.whl}'
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.schema}
 
-        - task_key: sync_fcr_chunks_to_lakebase
+        - task_key: download_fcrs
           depends_on:
-            - task_key: process_fcr_documents
+            - task_key: dbt_register
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/03_retrieval/sync_fcr_chunks_to_lakebase.py
+            notebook_path: ../notebooks/01_ingestion/download_fcrs.py
+
+        # Everything downstream of the downloaded FCRs; the register was built by dbt_register
+        - task_key: dbt_context
+          depends_on:
+            - task_key: download_fcrs
+          environment_key: dbt
+          dbt_task:
+            source: WORKSPACE
+            project_directory: ../dbt
+            commands:
+              - dbt deps
+              - >-
+                dbt build --select int_fcr_documents+ dim_fcr_entities
+                --vars '{fcr_curator_wheel: ${workspace.artifact_path}/.internal/fcr_curator-0.0.1-py3-none-any.whl}'
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+
+        - task_key: sync_knowledge_base_to_lakebase
+          depends_on:
+            - task_key: dbt_context
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/02_retrieval/sync_knowledge_base_to_lakebase.py

@@ -1,0 +1,57 @@
+# dbt transformations of the FCR Curator, one folder per layer:
+#   staging       one model per landed source or seed, lightly cleaned; the entity list  (bronze)
+#   intermediate  the current search results, curation into the register        (bronze)
+#   context       the chunking chain: parse, hash, chunk, attach metadata       (silver)
+#   context/ai    embeddings and the knowledge base the assistant serves        (gold)
+#   marts         the search plan and register the Python tasks read, and coverage by insurer (gold)
+# Python only does what dbt can't - call SerpAPI, read disclosures pages, download PDFs - and appends
+# what it saw to the landed tables dbt defines (models/staging/_sources.yml).
+name: fcr_curator
+version: "0.1.0"
+profile: fcr_curator
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # The volume the download task writes FCR PDFs to, in the target's catalog and schema
+  fcr_volume: fcr_documents
+  # The pipeline's wheel, which the Python models install; the job passes the deployed path
+  fcr_curator_wheel: ""
+  # Embeddings come from the course's Unity Gateway service through Python (fcr_curator.gateway),
+  # because SQL ai_query can't reach it; the package's SQL embed() is therefore not used
+  embedding_endpoint: course_ops.gateway.embed
+  embedding_model: course_ops.gateway.embed
+  ai_functions_enabled: false
+
+# What the models read must exist before they build, including on a target's first run: the volume the
+# PDFs land in, and the tables the Python tasks append to
+on-run-start:
+  - "create volume if not exists {{ fcr_volume_name() }}"
+  - "{{ create_landed_tables() }}"
+
+seeds:
+  fcr_curator:
+    +persist_docs: {relation: true, columns: true}
+
+models:
+  # The package's own audit and monitoring models aren't used
+  dbt_context_engineering:
+    +enabled: false
+  fcr_curator:
+    # Column descriptions become Unity Catalog comments, which Genie and agents read as context
+    +persist_docs: {relation: true, columns: true}
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    context:
+      +materialized: view
+      ai:
+        +materialized: incremental
+        +tblproperties: {quality: gold, delta.enableChangeDataFeed: "true"}
+    marts:
+      +materialized: view

@@ -1,9 +1,9 @@
 """Keep a Lakebase (Postgres) copy of the searchable chunks, for semantic and hybrid search.
 
 A Lakebase synced table copies a Unity Catalog Delta table into Postgres and follows its changes
-(through the Delta table's Change Data Feed). Ours copies gold_fcr_chunks_by_section, with:
+(through the Delta table's Change Data Feed). Ours copies the dbt knowledge base, fcr_knowledge_base, with:
 
-- id as the primary key
+- source_key as the primary key
 - embedding as a native pgvector vector(1024) column, so Postgres can search it directly
 - TRIGGERED scheduling: it refreshes when a pipeline run asks, not continuously (cheaper)
 
@@ -32,6 +32,7 @@ from databricks.sdk.service.postgres import (
 from loguru import logger
 
 from fcr_curator.config import ProjectConfig
+from fcr_curator.tables import KNOWLEDGE_BASE_TABLE
 
 if TYPE_CHECKING:
     import psycopg
@@ -48,12 +49,14 @@ REFRESH_POLL_SECONDS = 15
 
 
 def synced_table_name(config: ProjectConfig, env: str) -> str:
-    """Return the synced table's name: <catalog>.<schema>.fcr_chunks_<env>.
+    """Return the synced table's name: <catalog>.<schema>.fcr_knowledge_base_lakebase_<env>.
 
-    It also names the Postgres table: fcr_chunks_<env> in schema <schema>. Every environment shares
-    one Lakebase database, so the environment is in the name to keep dev, acc and prd apart.
+    It also names the Postgres table: fcr_knowledge_base_lakebase_<env> in schema <schema>. "lakebase"
+    tells it apart from the Delta table it copies, next to which it sorts in Catalog Explorer. Every
+    environment shares one Lakebase database, so the environment is in the name to keep dev, acc and
+    prd apart.
     """
-    return f"{config.full_schema_name}.fcr_chunks_{env}"
+    return f"{config.full_schema_name}.{KNOWLEDGE_BASE_TABLE}_lakebase_{env}"
 
 
 def endpoint_path(config: ProjectConfig) -> str:
@@ -62,10 +65,10 @@ def endpoint_path(config: ProjectConfig) -> str:
 
 
 def synced_table_spec(config: ProjectConfig, source_table: str) -> SyncedTableSyncedTableSpec:
-    """Return how to sync source_table: keyed by id, embedding as vector(1024), refreshed on request."""
+    """Return how to sync source_table: keyed by source_key, embedding as vector(1024), refreshed on request."""
     return SyncedTableSyncedTableSpec(
         source_table_full_name=source_table,
-        primary_key_columns=["id"],
+        primary_key_columns=["source_key"],
         scheduling_policy=SyncedTableSyncedTableSpecSyncedTableSchedulingPolicy.TRIGGERED,
         branch=f"projects/{config.lakebase_instance}/branches/{LAKEBASE_BRANCH}",
         postgres_database=POSTGRES_DATABASE,

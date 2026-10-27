@@ -1,0 +1,67 @@
+version: 2
+
+models:
+  - name: fcr_search_plan
+    description: >
+      The SerpAPI searches due this run, most promising first - site queries for years a known website is
+      missing, name queries for reference-list entities without the latest year, then generic discovery
+      queries - leaving out any query still waiting after its last run. Read by the search_fcrs task.
+    config:
+      submission_method: serverless_cluster
+      environment_key: fcr_curator
+      environment_dependencies: ["{{ var('fcr_curator_wheel') }}"]
+    columns:
+      - name: priority
+        description: The order to ask the queries in, from 1; the run stops when its budget is spent.
+        data_tests: [unique, not_null]
+      - name: query
+        data_tests: [unique, not_null]
+      - name: reason
+        description: Why it's asked.
+        data_tests: [{accepted_values: {arguments: {values: [missing_year, institution, discovery]}}}]
+      - name: max_pages
+        description: The most results pages the query may use (each costs a search).
+
+  - name: fcr_register
+    description: >
+      The FCR register: one curated FCR per (re)insurer, reporting year and kind, with when its PDF was
+      downloaded. Read by the search_fcrs and download_fcrs tasks.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: downloaded_at
+        description: When the PDF arrived in the volume; empty until it's downloaded.
+      - name: download_attempts
+        description: How many times the download task has tried to fetch the PDF.
+      - name: last_download_outcome
+        description: How the latest attempt went - downloaded, failed (couldn't fetch) or rejected (not a PDF).
+
+  - name: dim_fcr_entities
+    description: >
+      One row per insurer on the entity list (BMA Class 4, Long Term E, 3B and groups, not in
+      liquidation), with the FCRs found for it. An insurer with fcrs_found = 0 has none found yet and is
+      still searched for.
+    columns:
+      - name: name
+        description: The insurer's name in proper case, as FCRs, chunks and citations show it.
+        data_tests: [unique, not_null]
+      - name: fcr_class
+        description: The licence it files its FCR under; for a composite, its most important one.
+        data_tests: [not_null]
+      - name: business
+        description: What that licence covers - general, long_term or group.
+        data_tests: [{accepted_values: {arguments: {values: [general, long_term, group]}}}]
+      - name: licence_types
+        description: Every licence it holds.
+      - name: group_assets_bn_usd
+        description: Its group's total assets in billions of US dollars, where known.
+      - name: fcrs_found
+        description: Curated FCRs found for it, one per reporting year.
+      - name: fcrs_downloaded
+        description: Of those, how many are in the volume.
+      - name: reporting_years
+        description: The years its FCRs report on; each is published the following year.
+      - name: latest_reporting_year
+        description: The most recent of them.
+      - name: has_fcr
+        description: True once any FCR is found for it.

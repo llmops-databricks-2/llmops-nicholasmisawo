@@ -1,0 +1,152 @@
+version: 2
+
+models:
+  - name: int_fcr_search_results
+    description: >
+      Every FCR PDF any search run has found, as the latest run that found it returned it, with every
+      query that ever found it, when it was first found, and whether it's still listed.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: search_queries
+        description: Every query (or page:<url>) that has found the URL, sorted.
+      - name: first_seen_at
+        description: When a run first found the URL.
+      - name: is_listed
+        description: >
+          False once a later run asked again every query that found the URL and none returned it;
+          curation prefers listed copies.
+
+  - name: int_fcr_register
+    description: >
+      The curated FCR register: one FCR per insurer on the entity list, reporting year and kind, named
+      after it (registered_name), with the volume path its PDF is downloaded to. FCRs that match no
+      listed insurer are left out.
+    config:
+      submission_method: serverless_cluster
+      environment_key: fcr_curator
+      environment_dependencies: ["{{ var('fcr_curator_wheel') }}"]
+      # As macros/fcr_volume.sql's fcr_volume_root(), which YAML can't call
+      volume_root: "/Volumes/{{ target.catalog }}/{{ target.schema }}/{{ var('fcr_volume') }}"
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: registered_name
+        description: The insurer's name on the entity list.
+        data_tests: [not_null]
+      - name: institution
+        description: The company's name as the FCR's title gives it.
+      - name: reporting_year
+        description: The year the FCR reports on.
+      - name: file_url
+        description: Where the FCR PDF was found.
+      - name: superseded_ids
+        description: Search results this FCR was preferred over (duplicates of the same institution, year and kind).
+      - name: volume_path
+        description: Where the download task puts the PDF; the file is there once stg_fcr_volume_files lists it.
+        data_tests: [unique, not_null]
+
+  - name: int_fcr_documents
+    description: One row per downloaded FCR with the insurer on the entity list it belongs to.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: company
+        description: The insurer's name, as the entity list gives it, to show and cite.
+        data_tests: [not_null]
+      - name: fcr_class
+        description: The licence the insurer files its FCR under.
+      - name: business
+        description: What that licence covers - general, long_term or group.
+
+unit_tests:
+  # Fixtures are SQL, since dict rows can't hold arrays; columns the rule ignores are constants
+  - name: a_url_is_delisted_only_when_a_later_run_asks_every_query_that_found_it
+    description: >
+      gone - its only query was asked again without it. returned - found again. not_all_asked - one of
+      its two queries wasn't asked again. page_gone - its disclosures page loaded without the link.
+    model: int_fcr_search_results
+    given:
+      - input: ref('stg_fcr_search_hits')
+        format: sql
+        rows: |
+          select document_id, 'An FCR' as title, null as snippet, null as pdf_url, null as displayed_link,
+            null as site_name, 'example.bm' as domain, search_queries, 1 as search_rank, 'serpapi' as source,
+            ingestion_timestamp, landed_at
+          from values
+            ('gone', array('a'), '2026-10-01', timestamp'2026-10-01'),
+            ('returned', array('a'), '2026-10-01', timestamp'2026-10-01'),
+            ('returned', array('a'), '2026-10-08', timestamp'2026-10-08'),
+            ('not_all_asked', array('a', 'b'), '2026-10-01', timestamp'2026-10-01'),
+            ('page_gone', array('page:example.bm/fcr'), '2026-10-01', timestamp'2026-10-01')
+            as hit(document_id, search_queries, ingestion_timestamp, landed_at)
+      - input: ref('stg_fcr_searches')
+        format: sql
+        rows: |
+          select 'a' as query, 'institution' as reason, 0 as page_start, 10 as results, 0 as fcr_results,
+            '2026-10-08' as searched_at, timestamp'2026-10-08' as landed_at
+      - input: ref('stg_fcr_page_reads')
+        format: sql
+        rows: |
+          select 'page:example.bm/fcr' as query, '2026-10-08' as read_at, timestamp'2026-10-08' as landed_at
+    expect:
+      rows:
+        - {document_id: gone, is_listed: false}
+        - {document_id: returned, is_listed: true}
+        - {document_id: not_all_asked, is_listed: true}
+        - {document_id: page_gone, is_listed: false}
+
+  - name: a_url_found_again_after_being_delisted_is_listed
+    model: int_fcr_search_results
+    given:
+      - input: ref('stg_fcr_search_hits')
+        format: sql
+        rows: |
+          select document_id, 'An FCR' as title, null as snippet, null as pdf_url, null as displayed_link,
+            null as site_name, 'example.bm' as domain, array('a') as search_queries, 1 as search_rank,
+            'serpapi' as source, ingestion_timestamp, landed_at
+          from values ('back', '2026-10-01', timestamp'2026-10-01'), ('back', '2026-10-15', timestamp'2026-10-15')
+            as hit(document_id, ingestion_timestamp, landed_at)
+      - input: ref('stg_fcr_searches')
+        format: sql
+        rows: |
+          select 'a' as query, 'institution' as reason, 0 as page_start, 10 as results, 0 as fcr_results,
+            searched_at, landed_at
+          from values ('2026-10-08', timestamp'2026-10-08'), ('2026-10-15', timestamp'2026-10-15') as search(searched_at, landed_at)
+      - input: ref('stg_fcr_page_reads')
+        format: sql
+        rows: |
+          select 'page:none' as query, '2026-10-01' as read_at, timestamp'2026-09-24' as landed_at
+    expect:
+      rows:
+        - {document_id: back, is_listed: true}
+
+  - name: a_url_keeps_every_query_that_found_it_its_first_sighting_and_its_latest_rank
+    model: int_fcr_search_results
+    given:
+      - input: ref('stg_fcr_search_hits')
+        format: sql
+        rows: |
+          select document_id, 'An FCR' as title, null as snippet, null as pdf_url, null as displayed_link,
+            null as site_name, 'example.bm' as domain, search_queries, search_rank, 'serpapi' as source,
+            ingestion_timestamp, landed_at
+          from values
+            ('fcr', array('b'), 5, '2026-10-01', timestamp'2026-10-01'),
+            ('fcr', array('a'), 2, '2026-10-08', timestamp'2026-10-08')
+            as hit(document_id, search_queries, search_rank, ingestion_timestamp, landed_at)
+      - input: ref('stg_fcr_searches')
+        format: sql
+        rows: |
+          select 'unrelated' as query, 'discovery' as reason, 0 as page_start, 10 as results, 0 as fcr_results,
+            '2026-10-01' as searched_at, timestamp'2026-09-24' as landed_at
+      - input: ref('stg_fcr_page_reads')
+        format: sql
+        rows: |
+          select 'page:none' as query, '2026-10-01' as read_at, timestamp'2026-09-24' as landed_at
+    expect:
+      format: sql
+      rows: |
+        select 'fcr' as document_id, 'An FCR' as title, null as snippet, null as pdf_url, null as displayed_link,
+          null as site_name, 'example.bm' as domain, array('a', 'b') as search_queries, 2 as search_rank,
+          'serpapi' as source, '2026-10-08' as ingestion_timestamp, '2026-10-01' as first_seen_at,
+          true as is_listed

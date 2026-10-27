@@ -32,6 +32,22 @@ def test_rewrite_leaves_filters_unset_when_none_are_named() -> None:
     assert rewrite_query("Who reports catastrophe risk?", chat, TODAY).filters == SearchFilters()
 
 
+def test_rewrite_reads_a_licence_class_the_question_limits_itself_to() -> None:
+    """A question about Class 4 reinsurers becomes a class filter, so only those insurers' chunks are searched."""
+    chat = replying('{"search_text": "catastrophe risk exposure", "institution": null, "fcr_class": "Class 4"}')
+
+    rewritten = rewrite_query("How do Class 4 reinsurers describe catastrophe risk?", chat, TODAY)
+
+    assert rewritten.filters == SearchFilters(fcr_class="Class 4")
+
+
+def test_rewrite_drops_a_class_that_isnt_on_the_entity_list() -> None:
+    """A class no chunk has would filter out everything, so it's ignored instead."""
+    chat = replying('{"search_text": "catastrophe risk", "fcr_class": "Class 2"}')
+
+    assert rewrite_query("How do Class 2 captives describe catastrophe risk?", chat, TODAY).filters == SearchFilters()
+
+
 def test_rewrite_tells_the_model_what_last_year_means() -> None:
     """The instructions give today's date, so 'last year' resolves to the previous calendar year."""
     seen: list[str] = []

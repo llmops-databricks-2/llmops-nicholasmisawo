@@ -1,4 +1,4 @@
-"""Rules that turn raw search results (bronze) into curated FCRs (silver).
+"""Rules that turn the raw search results into curated FCRs, the register.
 
 Search results are noisy: next to Bermuda FCRs they include annual reports and press releases. In the
 Bermuda context a "Financial Condition Report" and a "Solvency and Financial Condition Report" are the
@@ -12,7 +12,8 @@ then keep one document per institution and year. Plain Python, so it can be test
 """
 
 import re
-from collections.abc import Iterable
+from collections import defaultdict
+from collections.abc import Callable, Iterable
 from datetime import date
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
@@ -29,7 +30,14 @@ YEAR_BESIDE_NAME_PATTERN = re.compile(
     r"(?:financial condition report|\bs?fcr)\D{0,30}?\b(20\d{2})\b|\b(20\d{2})\b\D{0,30}?(?:financial condition report|fcr\b)"
 )
 # Leftovers around an institution's name once the report's name is cut out of a title
-TITLE_LEFTOVERS = re.compile(r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+")
+TITLE_LEFTOVERS = re.compile(
+    r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+", re.IGNORECASE
+)
+
+# Dropped from an institution name before matching, so "Wilton Re Ltd." still finds wiltonre.bm
+LEGAL_SUFFIXES = re.compile(r"\b(?:ltd|limited|inc|plc|llc|sa|se|ag|group)\b\.?", re.IGNORECASE)
+# Name keys shorter than this ("re", or "" once "Group" is stripped) would match almost any insurer
+MIN_NAME_KEY_CHARS = 4
 
 # Sorts a result Google gave no rank after every ranked one
 UNRANKED = float("inf")
@@ -59,6 +67,23 @@ def dedupe_key(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", normalize_title(text).lower())
 
 
+def institution_key(name: str) -> str:
+    """Return a name as lower-case letters and digits, legal suffixes removed: 'Wilton Re Ltd.' -> 'wiltonre'."""
+    return dedupe_key(LEGAL_SUFFIXES.sub("", name))
+
+
+def same_institution(name: str, other: str) -> bool:
+    """Return True if two names refer to one insurer: one key starts the other, and neither is too short.
+
+    "Everest Re" matches "Everest Reinsurance (Bermuda) Ltd"; "Argo" doesn't match "Cargo", and a bare
+    "Group" matches nothing.
+    """
+    key, other_key = institution_key(name), institution_key(other)
+    if min(len(key), len(other_key)) < MIN_NAME_KEY_CHARS:
+        return False
+    return key.startswith(other_key) or other_key.startswith(key)
+
+
 def file_name(url: str) -> str:
     """Return the decoded filename at the end of a URL."""
     return unquote(PurePosixPath(urlparse(url or "").path).name)
@@ -74,10 +99,15 @@ def _readable_file_name(url: str) -> str:
     return re.sub(r"[-_.]+", " ", PurePosixPath(file_name(url)).stem).lower()
 
 
+def on_domain(host: str | None, domain: str) -> bool:
+    """Return True if host is domain or one of its subdomains: 'cdn.bma.bm' is on 'bma.bm'."""
+    host, domain = (host or "").lower(), domain.lower()
+    return host == domain or host.endswith(f".{domain}")
+
+
 def is_excluded_domain(domain: str | None) -> bool:
     """Return True for an EXCLUDED_DOMAINS domain or any of its subdomains."""
-    host = (domain or "").lower()
-    return any(host == excluded or host.endswith(f".{excluded}") for excluded in EXCLUDED_DOMAINS)
+    return any(on_domain(domain, excluded) for excluded in EXCLUDED_DOMAINS)
 
 
 # --- What a result is -------------------------------------------------------------------------
@@ -114,19 +144,39 @@ def institution(title: str, site_name: str | None = None) -> str | None:
     return name or site_name or None
 
 
+def title_subject(title: str | None) -> str | None:
+    """Return the title after the report's name, where some insurers put their own name.
+
+    "FINANCIAL CONDITION REPORT - Wilton Re Bermuda" -> "Wilton Re Bermuda". Often it's only a date or
+    "(SFCR", which names no insurer, so it's only ever matched against names, never shown.
+    """
+    normalized = normalize_title(title or "")
+    match = FCR_NAME_PATTERN.search(normalized)
+    return (TITLE_LEFTOVERS.sub("", normalized[match.end() :]) or None) if match else None
+
+
 # --- Curating ---------------------------------------------------------------------------------
 
 
-def curate_document(raw: dict, today: date | None = None) -> dict:
-    """Turn one bronze row into a silver row (before filtering and de-duplication)."""
+# Finds the reference name of a curated document's insurer, or None (see reference.entity_resolver)
+EntityResolver = Callable[[dict], str | None]
+
+
+def _no_entity(document: dict) -> None:
+    return None
+
+
+def curate_document(raw: dict, today: date | None = None, resolve_entity: EntityResolver = _no_entity) -> dict:
+    """Turn one search-results row into a register row (before filtering and de-duplication)."""
     url, title, snippet = raw.get("pdf_url"), raw["title"], raw.get("snippet")
     search_queries = list(raw.get("search_queries") or [])
     # Google's filetype:pdf only returns PDFs, so trust it when the URL has no extension
     found_as_pdf = any("filetype:pdf" in query for query in search_queries)
 
-    return {
+    document = {
         "document_id": raw["document_id"],
         "source": raw.get("source"),
+        "registered_name": None,  # Set below, once the fields it's matched on are known
         "institution": institution(title, raw.get("site_name")),
         "domain": raw.get("domain"),
         "title": normalize_title(title),
@@ -142,6 +192,7 @@ def curate_document(raw: dict, today: date | None = None) -> dict:
         "ingestion_timestamp": raw.get("ingestion_timestamp"),
         "first_seen_at": raw.get("first_seen_at"),
     }
+    return {**document, "registered_name": resolve_entity(document)}
 
 
 def _preference(document: dict) -> tuple:
@@ -149,36 +200,61 @@ def _preference(document: dict) -> tuple:
     return (not document["is_listed"], document["search_rank"] or UNRANKED, document["first_seen_at"] or "")
 
 
-def deduplicate(documents: list[dict]) -> list[dict]:
-    """Keep one document per (domain, institution, reporting year).
-
-    The same FCR is often online at several URLs. The one kept is: still returned by search, then the
-    best-ranked, then the first found. The others' ids go in its superseded_ids.
-    """
-    groups: dict[tuple, list[dict]] = {}
-    for doc in documents:
-        group_key = (doc["domain"], dedupe_key(doc["institution"] or doc["title"]), doc["reporting_year"])
-        groups.setdefault(group_key, []).append(doc)
+def _keep_best(documents: list[dict], group_key: Callable[[dict], tuple]) -> list[dict]:
+    # One document per group: the preferred one, recording every id it replaced (including earlier passes')
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for document in documents:
+        groups[group_key(document)].append(document)
 
     kept = []
     for group in groups.values():
         best, *duplicates = sorted(group, key=_preference)
-        kept.append({**best, "superseded_ids": [d["document_id"] for d in duplicates]})
+        replaced = [id_ for duplicate in duplicates for id_ in (duplicate["document_id"], *duplicate["superseded_ids"])]
+        kept.append({**best, "superseded_ids": [*best["superseded_ids"], *replaced]})
+    return kept
 
+
+def _same_report(document: dict) -> tuple:
+    # An insurer on the entity list has one report per year, wherever it's hosted; anyone else's are told
+    # apart by website and name. The kind is part of the key: an FCR and annual accounts aren't copies.
+    if document["registered_name"]:
+        whose = (document["registered_name"],)
+    else:
+        whose = (document["domain"], dedupe_key(document["institution"] or document["title"]))
+    return (*whose, document["reporting_year"], document["doc_kind"])
+
+
+def deduplicate(documents: list[dict]) -> list[dict]:
+    """Keep one document per file, then one per insurer (or domain and institution), reporting year and kind.
+
+    The same PDF can arrive from several sources (a search and a disclosures page), and the same FCR is
+    often online at several URLs. The one kept is: still listed, then the best-ranked, then the first
+    found. The others' ids go in its superseded_ids.
+    """
+    one_per_file = _keep_best(documents, lambda document: (document["file_url"],))
+    kept = _keep_best(one_per_file, _same_report)
     return sorted(kept, key=lambda d: (-(d["reporting_year"] or 0), d["institution"] or ""))
 
 
-def curate(raw_documents: list[dict], file_types: tuple[str, ...] = ("pdf",), today: date | None = None) -> list[dict]:
-    """Curate every bronze row: keep PDFs not on an excluded domain, then de-duplicate."""
-    curated = [curate_document(raw, today=today) for raw in raw_documents]
+def curate(
+    raw_documents: list[dict],
+    file_types: tuple[str, ...] = ("pdf",),
+    today: date | None = None,
+    resolve_entity: EntityResolver = _no_entity,
+) -> list[dict]:
+    """Curate every search-results row: keep PDFs not on an excluded domain, then de-duplicate.
+
+    resolve_entity names each document's insurer as the entity list has it (registered_name).
+    """
+    curated = [curate_document(raw, today=today, resolve_entity=resolve_entity) for raw in raw_documents]
     return deduplicate([d for d in curated if d["file_type"] in file_types and not is_excluded_domain(d["domain"])])
 
 
-# --- Filters for silver -----------------------------------------------------------------------
+# --- Filters for the register -----------------------------------------------------------------
 
 
 def keep_doc_kinds(documents: Iterable[dict], doc_kinds: Iterable[str]) -> list[dict]:
-    """Keep documents of the given kinds. An empty or misspelt kind is an error, not an empty silver."""
+    """Keep documents of the given kinds. An empty or misspelt kind is an error, not an empty register."""
     kinds = set(doc_kinds)
     if not kinds or not kinds <= set(DOC_KINDS):
         raise ValueError(f"doc_kinds must be a non-empty subset of {list(DOC_KINDS)}, got {sorted(kinds)}")

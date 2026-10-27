@@ -1,24 +1,32 @@
-"""Decide which SerpAPI searches a bronze run makes.
+"""Decide which SerpAPI searches a run of the search task makes (run by dbt's fcr_search_plan model).
 
 The plan allows 1,000 searches a month, and even an empty results page costs one, so every run asks
 only the queries most likely to find an FCR PDF we don't have yet. In priority order:
 
-1. missing_year  - site: query for a domain that has an FCR in silver, but not for the latest year
-2. institution   - query for an insurer you named that has no FCR for the latest year
+1. missing_year  - site: query for a domain with an FCR in the register, but not for the latest year
+2. institution   - name query for an insurer on the entity list with no FCR for the latest year, under
+                   its name and each alias, without legal suffixes such as Ltd.: a report says "Arch
+                   Reinsurance", not always "Arch Reinsurance Ltd."
 3. discovery     - generic queries per reporting year; the only way to find new websites
 
 A query that ran recently is skipped: for 28 days, or 90 days if it found nothing FCR-like last time.
 """
 
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from fcr_curator.curation import EXCLUDED_DOMAINS, dedupe_key
+from fcr_curator.curation import EXCLUDED_DOMAINS, institution_key
 
 # Added to open-ended queries so pages from excluded sites don't use up paid result slots
 EXCLUDED_SITES = " ".join(f"-site:{domain}" for domain in EXCLUDED_DOMAINS)
+
+# Trailing legal words a report's text often leaves out: "Partner Reinsurance Company Ltd." -> "Partner Reinsurance"
+TRAILING_LEGAL_WORDS = re.compile(
+    r"(?:[\s,]+(?:ltd|limited|inc|plc|llc|s\.?a|se|ag|n\.?v|company|co)\.?)+$", re.IGNORECASE
+)
 
 # Some Bermuda insurers call their FCR a "Solvency and Financial Condition Report", so both names are searched
 DISCOVERY_TEMPLATES = (
@@ -33,7 +41,9 @@ class SearchSettings:
     """What a run looks for, and how long it waits before repeating a query."""
 
     latest_year: int  # Newest reporting year to look for
-    institutions: tuple[str, ...] = ()  # Insurers to search for by name
+    # Insurers to search for by name, in search order: each one's names, its registered name first,
+    # then its aliases
+    institutions: tuple[tuple[str, ...], ...] = ()
     discovery_years: int = 3  # Reporting years the generic queries cover, counting back from latest_year
     requery_after_days: int = 28
     dead_query_requery_days: int = 90  # For a query whose last run found nothing FCR-like
@@ -58,10 +68,10 @@ class QueryHistory:
 
 @dataclass(frozen=True)
 class Coverage:
-    """Reporting years silver already has an FCR for, by domain and by institution."""
+    """Reporting years the register already has an FCR for, by domain and by institution."""
 
     domains: Mapping[str, set[int]]
-    institutions: Mapping[str, set[int]]  # Keyed by dedupe_key(institution)
+    institutions: Mapping[str, set[int]]  # Keyed by the insurer's registered name
 
 
 # --- Query text -------------------------------------------------------------------------------
@@ -72,26 +82,31 @@ def site_query(domain: str, year: int) -> str:
     return f'site:{domain} "financial condition report" {year} filetype:pdf'
 
 
+def search_name(name: str) -> str:
+    """Return a name as reports write it, without trailing legal words: 'Hiscox Ltd' -> 'Hiscox'."""
+    return TRAILING_LEGAL_WORDS.sub("", name).strip() or name
+
+
 def institution_query(name: str) -> str:
     """Query one insurer's FCRs by name."""
-    return f'"{name}" "financial condition report" filetype:pdf {EXCLUDED_SITES}'
+    return f'"{search_name(name)}" "financial condition report" filetype:pdf {EXCLUDED_SITES}'
 
 
 # --- What we already have ---------------------------------------------------------------------
 
 
-def coverage(silver_rows: Iterable[dict]) -> Coverage:
-    """Collect which reporting years silver holds, per domain and per institution."""
+def coverage(register_rows: Iterable[dict]) -> Coverage:
+    """Collect which reporting years the register holds, per domain and per insurer's registered name."""
     domains: dict[str, set[int]] = defaultdict(set)
     institutions: dict[str, set[int]] = defaultdict(set)
-    for row in silver_rows:
+    for row in register_rows:
         year = row.get("reporting_year")
         if not year:
             continue
         if row.get("domain"):
             domains[row["domain"]].add(year)
-        if row.get("institution"):
-            institutions[dedupe_key(row["institution"])].add(year)
+        if row.get("registered_name"):
+            institutions[row["registered_name"]].add(year)
     return Coverage(dict(domains), dict(institutions))
 
 
@@ -126,11 +141,9 @@ def is_due(history: QueryHistory | None, now: datetime, settings: SearchSettings
 
 
 def _has_latest_fcr(name: str, known: Coverage, year: int) -> bool:
-    # Silver's names come from titles, so "Example Re" should match "Example Re Ltd."
-    key = dedupe_key(name)
-    return any(
-        year in years and (key in known_key or known_key in key) for known_key, years in known.institutions.items()
-    )
+    # Exact: "Everest Group Ltd." isn't covered by "Everest Reinsurance (Bermuda), Ltd."'s FCR
+    key = institution_key(name)
+    return any(year in years and institution_key(known_name) == key for known_name, years in known.institutions.items())
 
 
 def plan_queries(
@@ -152,8 +165,9 @@ def plan_queries(
         ),
         *(
             PlannedQuery(institution_query(name), "institution", max_pages=1)
-            for name in settings.institutions
-            if not _has_latest_fcr(name, known, year)
+            for names in settings.institutions
+            if not _has_latest_fcr(names[0], known, year)
+            for name in names
         ),
         *(
             PlannedQuery(template.format(year=discovery_year), "discovery", max_pages=2)

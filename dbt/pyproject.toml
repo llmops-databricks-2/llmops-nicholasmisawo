@@ -1,0 +1,10 @@
+[project]
+name = "fcr-curator-dbt"
+version = "0.1.0"
+description = "dbt transformations of the FCR Curator (bronze, silver and gold layers)"
+requires-python = "==3.12.*"
+# Its own environment: dbt-databricks pins databricks-sdk below the version the pipeline package needs
+dependencies = ["dbt-databricks>=1.10,<2"]
+
+[tool.uv]
+package = false

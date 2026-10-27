@@ -1,0 +1,50 @@
+version: 2
+
+# What the Python tasks land: append-only facts, each stamped with the run that landed it (landed_at).
+# These column lists are the contract. dbt creates the tables from them before every run
+# (macros/landed_tables.sql), and the Python tasks append to whatever they define, failing on a row
+# with a column they don't (src/fcr_curator/landing.py). The FCR PDFs themselves are read from the
+# volume by stg_fcr_volume_files.
+sources:
+  - name: landed
+    schema: "{{ target.schema }}"
+    tables:
+      - name: raw_fcr_search_hits
+        description: Every FCR PDF a search run found, by SerpAPI search or on a disclosures page, as the source returned it.
+        columns:
+          - {name: document_id, data_type: string, description: "The PDF's id, from its source and normalised URL."}
+          - {name: title, data_type: string}
+          - {name: snippet, data_type: string}
+          - {name: pdf_url, data_type: string}
+          - {name: displayed_link, data_type: string}
+          - {name: site_name, data_type: string, description: The result's site as Google names it.}
+          - {name: domain, data_type: string}
+          - {name: search_queries, data_type: "array<string>", description: "Every query this run that found the URL (page:<url> for a disclosures page), sorted."}
+          - {name: search_rank, data_type: int, description: "Best position across those queries, 1-based."}
+          - {name: source, data_type: string, description: serpapi or pages.}
+          - {name: ingestion_timestamp, data_type: string, description: When the run found it (UTC ISO).}
+          - &landed_at {name: landed_at, data_type: timestamp, description: When the run appended the row; one value per run.}
+      - name: raw_fcr_searches
+        description: Every billed SerpAPI search, one row per results page.
+        columns:
+          - {name: query, data_type: string}
+          - {name: reason, data_type: string, description: "Why the plan asked it: missing_year, institution or discovery."}
+          - {name: page_start, data_type: int, description: "Result offset of the page: 0, 10, ..."}
+          - {name: results, data_type: int}
+          - {name: fcr_results, data_type: int, description: Results whose title, filename or snippet look like an FCR.}
+          - {name: searched_at, data_type: string, description: UTC ISO.}
+          - *landed_at
+      - name: raw_fcr_page_reads
+        description: Every disclosures page that loaded, recorded as its search_queries entry (page:<url>).
+        columns:
+          - {name: query, data_type: string}
+          - {name: read_at, data_type: string, description: UTC ISO.}
+          - *landed_at
+      - name: raw_fcr_download_attempts
+        description: Every attempt to fetch an FCR's PDF, and whether it was downloaded, failed or rejected.
+        columns:
+          - {name: document_id, data_type: string}
+          - {name: file_url, data_type: string}
+          - {name: outcome, data_type: string, description: "downloaded, failed (couldn't fetch) or rejected (not a PDF)."}
+          - {name: attempted_at, data_type: string, description: UTC ISO.}
+          - *landed_at
