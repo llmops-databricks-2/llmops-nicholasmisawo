@@ -3,9 +3,12 @@
 # One job running the medallion stages in order, each task starting only
 # once the one before it succeeds:
 #
-#   bronze_fcr_documents   search for FCRs with SerpAPI and upsert bronze
+#   dbt_seed               load and test the reference list (dbt seed ref_bermuda_reinsurers)
+#   bronze_fcr_documents   search for FCRs with SerpAPI and on disclosures pages; upsert bronze
 #   silver_fcr_documents   curate bronze into silver, download new PDFs
 #   process_fcr_documents  parse, chunk and embed newly downloaded FCRs
+#   dbt_context            dbt: staging -> intermediate -> context (section chunks, embeddings)
+#                          -> fcr_knowledge_base, plus the dim_fcr_companies coverage mart
 #   sync_fcr_chunks_to_lakebase  create or refresh the Lakebase synced table of the chunks
 #
 # Every stage is incremental, so re-runs only pick up new or changed FCRs.
@@ -26,6 +29,8 @@ resources:
   jobs:
     fcr_pipeline:
       name: fcr_pipeline-${bundle.target}
+      # One run at a time: every run writes the same tables, so a second start queues until the first ends
+      max_concurrent_runs: 1
       schedule:
         quartz_cron_expression: "0 0 6 ? * MON"
         timezone_id: "Atlantic/Bermuda"
@@ -45,9 +50,31 @@ resources:
             environment_version: "6"
             dependencies:
               - ../dist/*.whl
+        # dbt has its own environment: dbt-databricks pins a databricks-sdk the wheel can't share
+        - environment_key: dbt
+          spec:
+            environment_version: "6"
+            dependencies:
+              - dbt-databricks>=1.10,<2
 
       tasks:
+        # dbt tasks run the dbt/ folder this bundle uploads, on the SQL warehouse; Databricks writes the
+        # dbt profile for them from warehouse_id, catalog and schema (dbt/profiles.yml is for local runs)
+        - task_key: dbt_seed
+          environment_key: dbt
+          dbt_task:
+            source: WORKSPACE
+            project_directory: ../dbt
+            commands:
+              - dbt deps
+              - dbt build --select bermuda_reinsurers
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+
         - task_key: bronze_fcr_documents
+          depends_on:
+            - task_key: dbt_seed
           environment_key: default
           notebook_task:
             notebook_path: ../notebooks/01_ingestion/bronze_fcr_documents.py
@@ -66,9 +93,26 @@ resources:
           notebook_task:
             notebook_path: ../notebooks/02_processing/process_fcr_documents.py
 
-        - task_key: sync_fcr_chunks_to_lakebase
+        - task_key: dbt_context
           depends_on:
             - task_key: process_fcr_documents
+          environment_key: dbt
+          dbt_task:
+            source: WORKSPACE
+            project_directory: ../dbt
+            # The Python models install the deployed wheel (its version comes from version.txt)
+            commands:
+              - dbt deps
+              - >-
+                dbt build --select +fcr_knowledge_base dim_fcr_companies
+                --vars '{fcr_curator_wheel: ${workspace.artifact_path}/.internal/fcr_curator-0.0.1-py3-none-any.whl}'
+            warehouse_id: ${var.warehouse_id}
+            catalog: ${var.catalog}
+            schema: ${var.schema}
+
+        - task_key: sync_fcr_chunks_to_lakebase
+          depends_on:
+            - task_key: dbt_context
           environment_key: default
           notebook_task:
             notebook_path: ../notebooks/03_retrieval/sync_fcr_chunks_to_lakebase.py

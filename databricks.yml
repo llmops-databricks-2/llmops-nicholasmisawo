@@ -22,6 +22,16 @@ variables:
   schedule_pause_status:
     description: PAUSED or UNPAUSED; only prd runs on its schedule (development mode pauses dev anyway)
     default: PAUSED
+  # The dbt tasks need these directly; they match project_config.yml
+  catalog:
+    description: Unity Catalog catalog the target writes to
+    default: llmops_dev
+  schema:
+    description: Schema within the catalog
+    default: nicholasmisawo
+  warehouse_id:
+    description: SQL warehouse the dbt tasks run on
+    default: "0e56acba898dad4a"
 
 # Three targets in the one course workspace, each writing your schema in its own catalog
 # (project_config.yml). Each is deployed under the home folder of whoever deploys it: you from your
@@ -42,6 +52,8 @@ targets:
     workspace:
       host: https://dbc-88df4c2c-4033.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.target}/${bundle.name}
+    variables:
+      catalog: llmops_acc
 
   # Production: deployed after acceptance, once you approve it.
   prd:
@@ -49,4 +61,5 @@ targets:
       host: https://dbc-88df4c2c-4033.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.target}/${bundle.name}
     variables:
+      catalog: llmops_prd
       schedule_pause_status: UNPAUSED
