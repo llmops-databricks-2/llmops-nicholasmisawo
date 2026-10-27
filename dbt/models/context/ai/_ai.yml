@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: fcr_chunk_embeddings
+    description: >
+      One 1,024-dimension gte-large-en-v1.5 vector per chunk text, from course_ops.gateway.embed through
+      the Unity Gateway API. Reuses any vector already made for the same id and content hash.
+    config:
+      submission_method: serverless_cluster
+      environment_key: fcr_curator
+      environment_dependencies: ["{{ var('fcr_curator_wheel') }}"]
+      # A plain config key, not meta: a Python model can read config keys but sees meta as empty
+      embedding_endpoint: "{{ var('embedding_endpoint') }}"
+    columns:
+      - name: id
+        data_tests: [unique, not_null]
+      - name: embedding
+        description: Not normalised; compare by cosine.
+        data_tests: [not_null]
+
+  - name: fcr_chunks_embedded
+    description: Chunks with the vector made for their current text.
+
+  - name: fcr_knowledge_base
+    description: >
+      The serving contract the assistant searches and Lakebase serves: one row per FCR chunk, in the
+      dbt_context_engineering knowledge_base shape. Search by meaning (embedding), keyword (text),
+      company (account_key) or reporting year (ts); cite citation_url, which opens the cited page.
+    columns:
+      - name: source_key
+        description: fcr::<chunk id>; the merge key.
+        data_tests: [unique, not_null]
+      - name: source_type
+        description: Always 'fcr'.
+      - name: source_id
+        description: The chunk id.
+        data_tests:
+          - relationships:
+              arguments: {to: ref('fcr_chunks_meta'), field: id}
+              config: {severity: warn}  # Orphans: chunks that left upstream, which the package never deletes
+      - name: account_key
+        description: The company - its reference-list name, else the name its FCR title gives.
+        data_tests: [not_null]
+      - name: text
+        description: The chunk's text, starting with its section heading.
+      - name: embedding
+        description: 1,024-dimension vector of text.
+        data_tests: [not_null]
+      - name: ts
+        description: 31 December of the FCR's reporting year.
+      - name: citation_url
+        description: The FCR PDF, opened at the chunk's page (#page=N).
+        data_tests: [not_null]

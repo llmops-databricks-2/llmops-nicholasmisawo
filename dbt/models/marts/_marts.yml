@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: dim_fcr_companies
+    description: >
+      FCR coverage by company: every company with a downloaded FCR or on the reference list, with the
+      reporting years found. A reference-list company with fcrs = 0 has no FCR found yet.
+    columns:
+      - name: company
+        data_tests: [unique, not_null]
+      - name: on_reference_list
+        description: True for companies on the reference list (ref_bermuda_reinsurers).
+      - name: fcrs
+        description: Downloaded FCRs found for the company.
+      - name: reporting_years
+        description: The years those FCRs report on.

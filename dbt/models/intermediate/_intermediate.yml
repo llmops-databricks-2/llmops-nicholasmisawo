@@ -1,0 +1,13 @@
+version: 2
+
+models:
+  - name: int_fcr_documents
+    description: One row per downloaded FCR with its company and the company's reference-list details.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: company
+        description: The company to show and cite - its reference-list name, else the name its FCR title gives.
+        data_tests: [not_null]
+      - name: assets_bn_usd
+        description: Total assets in billions of US dollars, for companies on the reference list.

@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: stg_fcr_documents
+    description: Curated FCRs whose PDF has been downloaded, one per (re)insurer and reporting year.
+    columns:
+      - name: document_id
+        description: The FCR's id.
+        data_tests: [unique, not_null]
+      - name: registered_name
+        description: The company's name on the reference list; empty if it isn't on it.
+      - name: institution
+        description: The company's name as the FCR's title gives it.
+      - name: reporting_year
+        description: The year the FCR reports on.
+      - name: file_url
+        description: Where the FCR PDF was found.
+  - name: stg_fcr_parsed_documents
+    description: The ai_parse_document output of each downloaded FCR, as JSON.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null, {relationships: {arguments: {to: ref('stg_fcr_documents'), field: document_id}, config: {severity: warn}}}]
+      - name: parsed_content
+        description: The parser's elements (text, headings, tables) with their pages, as JSON.
+  - name: stg_fcr_reinsurers
+    description: The reference list of Bermuda insurers and reinsurers, with multi-value columns as arrays.
+    columns:
+      - name: name
+        data_tests: [unique, not_null]

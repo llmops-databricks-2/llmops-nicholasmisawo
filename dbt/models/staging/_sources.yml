@@ -1,0 +1,21 @@
+version: 2
+
+# What Python lands, which dbt builds on (see docs/05-layers.md)
+sources:
+  - name: landed
+    schema: nicholasmisawo
+    tables:
+      - name: bronze_fcr_documents
+        description: Every FCR PDF found by SerpAPI search or on a disclosures page, as the source returned it.
+      - name: bronze_fcr_search_log
+        description: One row per SerpAPI search made.
+      - name: silver_fcr_documents
+        description: >
+          The curated FCR register: one row per (re)insurer and reporting year, named after the reference
+          list (registered_name), with the downloaded PDF's location in the volume (volume_path).
+      - name: silver_parsed_fcr_documents
+        description: ai_parse_document output (as JSON) for each downloaded FCR, from the Python processing task.
+      - name: gold_fcr_chunks_by_section
+        description: >
+          The Python pipeline's embedded section chunks. Read only to reuse embeddings already made for
+          identical text, so dbt never embeds the same text twice; retired at the switch-over.

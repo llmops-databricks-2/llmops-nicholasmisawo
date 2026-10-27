@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: fcr_parsed_hashed
+    description: Each parsed FCR with a content hash, so changed parses can be told from unchanged ones.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+
+  - name: chunk_fcr_sections
+    description: >
+      Section chunks of every parsed FCR, made by the pipeline's chunker (fcr_curator.chunking): each
+      starts with its section heading, short sections merge, text packs up to 2,000 characters and
+      tables split by rows with their header row repeated.
+    config:
+      submission_method: serverless_cluster
+      environment_key: fcr_curator
+      environment_dependencies: ["{{ var('fcr_curator_wheel') }}"]
+    columns:
+      - name: id
+        description: Unique chunk id, <document_id>_<chunk_seq>.
+        data_tests: [unique, not_null]
+      - name: chunk_seq
+        description: The chunk's position within its FCR, from 0.
+      - name: page_id
+        description: Page the chunk starts on, counted from 0 (add 1 for the printed page).
+      - name: chunk_text
+        description: The chunk's text, starting with its section heading; tables are HTML.
+        data_tests: [not_null]
+      - name: content_hash
+        description: sha2-256 of chunk_text; an embedding is reused only for the same hash.
+
+  - name: fcr_chunks_meta
+    description: Every chunk with its FCR's current company, year, title and source URL.
+    columns:
+      - name: id
+        data_tests: [unique, not_null]
+      - name: company
+        description: The company to show and cite.
+        data_tests: [not_null]
