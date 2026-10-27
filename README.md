@@ -23,8 +23,8 @@ market. It should answer questions like:
 
 ```text
    dbt                     Python                         dbt          Python           dbt
-reference list -> plan -> search + disclosures pages -> curate -> download PDFs -> parse -> chunk -> embed -> knowledge base
-  (seed)  fcr_search_plan  raw_fcr_search_hits            fcr_register  (volume)      fcr_parsed_documents        fcr_knowledge_base
+entity list   -> plan -> search + disclosures pages -> curate -> download PDFs -> parse -> chunk -> embed -> knowledge base
+  (BMA)   fcr_search_plan  raw_fcr_search_hits            fcr_register  (volume)      fcr_parsed_documents        fcr_knowledge_base
                                                                                                                 |
                                                                                               Lakebase (pgvector) copy
                                                                                                                 |
@@ -35,8 +35,9 @@ Python does only what dbt can't: calling SerpAPI, reading disclosures pages and 
 appends what it saw to tables dbt defines, never updating a row; dbt plans the searches and works out
 everything else.
 
-One weekly job runs everything up to Lakebase. Search runs on demand. Every FCR is named after the
-reference list where its company is on it, and every citation opens the PDF at the cited page. The design
+One weekly job runs everything up to Lakebase. Search runs on demand. The entity list is the BMA's
+licensed Class 4, Long Term E, Class 3B and group insurers; every FCR kept is named after one of them,
+and every citation opens the PDF at the cited page. The design
 and what we found at each stage are in [`docs/`](docs/README.md):
 
 | Doc | Covers |

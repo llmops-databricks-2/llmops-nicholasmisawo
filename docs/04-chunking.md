@@ -28,7 +28,7 @@ What the parser found across the 78 FCRs:
    - a section under 200 characters merges into the next
    - tables get chunks of their own, split by rows with the header row repeated
 
-Every chunk carries its FCR's `registered_name`, `institution`, `reporting_year`, `domain`, `title`,
+Every chunk carries its FCR's `registered_name`, the insurer's `fcr_class` and `business`, `institution`, `reporting_year`, `domain`, `title`,
 `file_url` and `page_id` (counted from 0, as the parser numbers pages). Every run reads this metadata
 fresh from the register, so a better name or a corrected year reaches chunks written earlier.
 

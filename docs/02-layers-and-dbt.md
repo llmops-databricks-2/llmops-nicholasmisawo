@@ -11,9 +11,12 @@ schema makes it answerable. The dbt project is laid out like dbt Labs'
 | **Raw** | Lands untouched | Python, appending to tables dbt defines | `raw_fcr_search_hits`, `raw_fcr_searches`, `raw_fcr_page_reads`, `raw_fcr_download_attempts`; PDFs in the `fcr_documents` volume |
 | **Bronze** | Machine-readable | dbt `staging/`, `intermediate/` | `stg_fcr_*` views → `int_fcr_search_results` → `int_fcr_register` (curation) → **`fcr_register`** → `int_fcr_documents` |
 | **Silver** | Retrievable | dbt `context/` | `fcr_parsed_documents` (parser output) → `fcr_parsed_hashed` → `chunk_fcr_sections` → `fcr_chunks_meta` |
-| **Gold** | Answerable | dbt `context/ai/`, `marts/` | `fcr_chunk_embeddings` → **`fcr_knowledge_base`** (copied to Lakebase as `fcr_knowledge_base_lakebase_<target>`); `dim_fcr_companies` |
+| **Gold** | Answerable | dbt `context/ai/`, `marts/` | `fcr_chunk_embeddings` → **`fcr_knowledge_base`** (copied to Lakebase as `fcr_knowledge_base_lakebase_<target>`); `dim_fcr_entities` |
 
-Reference data: **`ref_bermuda_entities`**, the dbt seed of the reference list (`dbt/seeds/`).
+Reference data, as dbt seeds (`dbt/seeds/`): **`ref_bma_insurance_register`**, every insurer the BMA
+licenses; **`ref_bma_licence_classes`**, which licences file an FCR and which are searched; and
+**`ref_fcr_entity_details`**, what we know beyond the BMA's list (domains, aliases, pages). Together they
+make the entity list, `stg_fcr_entities` ([03 Data pipeline](03-data-pipeline.md#the-entity-list)).
 
 **Naming.** Raw, bronze, silver and gold are layers of meaning, not table prefixes. Tables Python lands
 start with `raw_` (dbt reads them as sources; the names live in `src/fcr_curator/tables.py`); dbt names
@@ -47,7 +50,8 @@ dbt/models/
   staging/       stg_fcr_search_hits, stg_fcr_searches, stg_fcr_page_reads,
                  stg_fcr_download_attempts   the landed facts, with the run that landed each  (SQL views)
                  stg_fcr_volume_files    the PDFs in the volume, read by path           (SQL view)
-                 stg_fcr_entities        the reference list, with arrays                (SQL view)
+                 stg_bma_insurers        each BMA-licensed insurer: files an FCR? class (SQL view)
+                 stg_fcr_entities        the entity list: in-scope insurers, details    (SQL view)
   intermediate/  int_fcr_search_results  every PDF found: latest copy, queries, delisting (SQL view)
                  int_fcr_register        curation, fcr_curator.curation                 (Python)
                  int_fcr_documents       each downloaded FCR with its company            (SQL view)
@@ -60,7 +64,7 @@ dbt/models/
                  fcr_knowledge_base      the package's knowledge_base serving shape    (SQL)
   marts/         fcr_search_plan         the searches due this run, fcr_curator.search_plan (Python)
                  fcr_register            the register the Python tasks read             (SQL view)
-                 dim_fcr_companies       FCR coverage by company and reporting year    (SQL view)
+                 dim_fcr_entities        each listed insurer: class, business, FCR years (SQL view)
 macros/          fcr_volume.sql          the volume's name, path and file listing
                  landed_tables.sql       creates the landed tables from _sources.yml
 ```
