@@ -1,6 +1,21 @@
 version: 2
 
 models:
+  - name: fcr_parsed_documents
+    description: >
+      The ai_parse_document output of each downloaded FCR, parsed once: its elements (text, headings,
+      tables as HTML) with the pages they're on.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: parsed_content
+        description: The parser's output as JSON.
+        data_tests: [not_null]
+      - name: parse_errors
+        description: Per-page errors as JSON; empty when every page parsed.
+      - name: parsed_at
+        description: When the FCR was parsed.
+
   - name: fcr_parsed_hashed
     description: Each parsed FCR with a content hash, so changed parses can be told from unchanged ones.
     columns:

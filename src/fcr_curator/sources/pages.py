@@ -43,7 +43,7 @@ class PageRead(NamedTuple):
     """The outcome of reading every listed page."""
 
     documents: list[dict]  # One search-results row per distinct PDF link
-    pages_read: list[str]  # Pages that loaded, so their missing links can be delisted
+    pages_read: list[dict]  # One raw_fcr_page_reads row per page that loaded, so dbt can delist its missing links
     errors: list[str]  # Pages that didn't load, with why
 
 
@@ -134,7 +134,7 @@ def fetch_page_documents(session: requests.Session, entities: Iterable[Reference
     """
     run_at = datetime.now(UTC).isoformat()
     rows: dict[str, dict] = {}
-    pages_read: list[str] = []
+    pages_read: list[dict] = []
     errors: list[str] = []
 
     for entity in entities:
@@ -146,7 +146,7 @@ def fetch_page_documents(session: requests.Session, entities: Iterable[Reference
                 logger.warning(f"Couldn't read {page_url} ({entity.name}): {error}")
                 errors.append(f"{page_url}: {error}")
                 continue
-            pages_read.append(page_query(page_url))
+            pages_read.append({"query": page_query(page_url), "read_at": run_at})
             for row in page_rows(extract_pdf_links(response.text, page_url), entity, page_url):
                 rows.setdefault(row["document_id"], {**row, "source": SOURCE, "ingestion_timestamp": run_at})
 

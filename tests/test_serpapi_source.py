@@ -175,6 +175,18 @@ def test_fetch_logs_each_search_with_its_fcr_like_results(serpapi_page: dict) ->
     assert (entry["results"], entry["fcr_results"]) == (2, 2)
 
 
+def test_results_and_log_entries_have_exactly_their_landed_columns(
+    serpapi_page: dict, landed_columns: dict[str, set[str]]
+) -> None:
+    """Every result and log entry a run returns lands as is: its columns are the ones dbt defines."""
+    run = fetch_fcr_documents(
+        FakeSession(FakeResponse(serpapi_page)), "key", [planned()], max_searches=5, pause_seconds=0
+    )
+
+    assert {frozenset(row) for row in run.documents} == {frozenset(landed_columns["raw_fcr_search_hits"])}
+    assert {frozenset(entry) for entry in run.log} == {frozenset(landed_columns["raw_fcr_searches"])}
+
+
 def test_fetch_keeps_earlier_results_when_a_later_search_fails(serpapi_page: dict) -> None:
     """An error stops the run, but searches already paid for keep their results and log entries."""
     session = FakeSession(

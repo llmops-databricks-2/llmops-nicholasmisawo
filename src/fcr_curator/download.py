@@ -1,7 +1,9 @@
 """Download curated FCRs into the Unity Catalog volume.
 
 Each file lands at <volume_root>/<source>/<document_id>.<file_type>. Files already there are skipped,
-so a re-run only fetches what's missing.
+so a re-run only fetches what's missing. The volume is the record of what's downloaded: dbt reads it
+(dbt/models/staging/stg_fcr_volume_files.sql). Every attempt is also returned, for the download task to
+land as a fact, so FCRs that keep failing show up in the register.
 """
 
 import os
@@ -11,6 +13,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import NamedTuple
 
 import requests
 from loguru import logger
@@ -31,14 +34,6 @@ class DownloadOutcome(StrEnum):
 
 
 @dataclass(frozen=True)
-class StoredFile:
-    """Where a file is in the volume, and when it got there."""
-
-    volume_path: str
-    processed: int | None  # Download time as yyyyMMddHHmm, the course's format
-
-
-@dataclass(frozen=True)
 class DownloadStats:
     """How a download run went."""
 
@@ -48,25 +43,22 @@ class DownloadStats:
     rejected: int = 0  # Downloaded, but not a PDF (e.g. a login page), so removed
 
 
+class DownloadRun(NamedTuple):
+    """The outcome of one run of downloads."""
+
+    attempts: list[dict]  # One row per attempt, for raw_fcr_download_attempts (dbt/models/staging/_sources.yml)
+    stats: DownloadStats
+
+
 def document_path(volume_root: str, document: dict) -> str:
     """Return where a document's file goes in the volume."""
     return f"{volume_root}/{document['source']}/{document['document_id']}.{document['file_type']}"
-
-
-def processed_stamp(moment: datetime) -> int:
-    """Return a moment as a yyyyMMddHHmm number in UTC, e.g. 202610260122."""
-    return int(moment.astimezone(UTC).strftime("%Y%m%d%H%M"))
 
 
 def is_pdf_file(path: str) -> bool:
     """Return True if the file has a PDF header."""
     with open(path, "rb") as file:
         return PDF_HEADER in file.read(PDF_HEADER_WINDOW)
-
-
-def _stored_file(path: str) -> StoredFile:
-    # The file's modified time is when it first arrived, so re-runs keep the original download time
-    return StoredFile(path, processed_stamp(datetime.fromtimestamp(os.path.getmtime(path), UTC)))
 
 
 def _fetch(document: dict, path: str, session: requests.Session, download: Callable) -> DownloadOutcome:
@@ -87,30 +79,36 @@ def download_documents(
     max_downloads: int | None = None,
     pause_seconds: float = 1.0,
     download: Callable[[requests.Session, str, str], bool] = download_file,
-) -> tuple[dict[str, StoredFile], DownloadStats]:
-    """Download the documents not yet in the volume.
+) -> DownloadRun:
+    """Download the documents not yet in the volume; return every attempt and the run's counts.
 
-    max_downloads caps new attempts (whatever their outcome); None means no cap. Returns the stored file
-    of every document now in the volume, by document_id, and the run's counts.
+    max_downloads caps new attempts (whatever their outcome); None means no cap.
     """
-    stored: dict[str, StoredFile] = {}
     skipped = 0
-    attempts: Counter[DownloadOutcome] = Counter()
+    attempts: list[dict] = []
+    outcomes: Counter[DownloadOutcome] = Counter()
 
     for document in documents:
         path = document_path(volume_root, document)
 
         if os.path.exists(path):
             skipped += 1
-        else:
-            if max_downloads is not None and attempts.total() >= max_downloads:
-                continue
-            outcome = _fetch(document, path, session, download)
-            attempts[outcome] += 1
-            if outcome != DownloadOutcome.DOWNLOADED:
-                continue
+            continue
+        if max_downloads is not None and outcomes.total() >= max_downloads:
+            continue
+        attempted_at = datetime.now(UTC).isoformat()
+        outcome = _fetch(document, path, session, download)
+        outcomes[outcome] += 1
+        attempts.append(
+            {
+                "document_id": document["document_id"],
+                "file_url": document["file_url"],
+                "outcome": outcome.value,
+                "attempted_at": attempted_at,
+            }
+        )
+        if outcome == DownloadOutcome.DOWNLOADED:
             time.sleep(pause_seconds)  # Be polite to insurers' websites
 
-        stored[document["document_id"]] = _stored_file(path)
-
-    return stored, DownloadStats(skipped=skipped, **{outcome.value: count for outcome, count in attempts.items()})
+    stats = DownloadStats(skipped=skipped, **{outcome.value: count for outcome, count in outcomes.items()})
+    return DownloadRun(attempts, stats)

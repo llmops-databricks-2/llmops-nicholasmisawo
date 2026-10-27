@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import requests
 
 from fcr_curator.reference import ReferenceEntity
-from fcr_curator.schemas import SOURCE_SCHEMA
 from fcr_curator.sources.pages import extract_pdf_links, fetch_page_documents, page_query, page_rows
 
 PAGE_URL = "https://www.example-re.com/reinsurance"
@@ -48,13 +47,6 @@ def test_rows_title_a_generic_link_after_its_file_and_credit_the_entity() -> Non
     assert first["search_queries"] == [page_query(PAGE_URL)]
 
 
-def test_rows_have_every_bronze_source_column() -> None:
-    """A page row plus the fields every source adds is exactly a bronze source row."""
-    [row, *_] = page_rows(extract_pdf_links(PAGE, PAGE_URL), ENTITY, PAGE_URL)
-
-    assert set(row) | {"source", "ingestion_timestamp"} == set(SOURCE_SCHEMA.fieldNames())
-
-
 class FakeSession:
     """Serves PAGE for one URL and fails for every other."""
 
@@ -71,7 +63,15 @@ def test_a_page_that_fails_is_reported_and_the_rest_still_read() -> None:
 
     read = fetch_page_documents(FakeSession(), [ENTITY, broken])
 
-    assert read.pages_read == [page_query(PAGE_URL)]
+    assert [page["query"] for page in read.pages_read] == [page_query(PAGE_URL)]
     assert len(read.errors) == 1 and "broken.example" in read.errors[0]
     assert {row["source"] for row in read.documents} == {"pages"}
     assert len(read.documents) == 3
+
+
+def test_pdfs_found_and_pages_read_have_exactly_their_landed_columns(landed_columns: dict[str, set[str]]) -> None:
+    """Every row the pages source returns lands as is: its columns are the ones dbt defines."""
+    read = fetch_page_documents(FakeSession(), [ENTITY])
+
+    assert {frozenset(row) for row in read.documents} == {frozenset(landed_columns["raw_fcr_search_hits"])}
+    assert {frozenset(row) for row in read.pages_read} == {frozenset(landed_columns["raw_fcr_page_reads"])}

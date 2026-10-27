@@ -1,4 +1,4 @@
-"""Decide which SerpAPI searches a run of the search task makes.
+"""Decide which SerpAPI searches a run of the search task makes (run by dbt's fcr_search_plan model).
 
 The plan allows 1,000 searches a month, and even an empty results page costs one, so every run asks
 only the queries most likely to find an FCR PDF we don't have yet. In priority order:

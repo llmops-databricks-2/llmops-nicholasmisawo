@@ -3,7 +3,7 @@
 Bermuda insurers publish FCRs on their own websites, so there is no single list to scrape; we search
 instead. fetch_fcr_documents asks the planned queries (see search_plan.py) and returns:
 
-- documents: one row per distinct result URL, for raw_fcr_search_results
+- documents: one row per distinct result URL, for raw_fcr_search_hits
 - log: one row per search made, for the search log table, so later runs know what was asked
 
 Nothing is downloaded here, and whether a result really is an FCR is decided later, in curation.py.

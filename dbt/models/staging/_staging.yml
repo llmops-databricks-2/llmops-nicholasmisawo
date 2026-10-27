@@ -1,27 +1,42 @@
 version: 2
 
 models:
-  - name: stg_fcr_documents
-    description: Curated FCRs whose PDF has been downloaded, one per (re)insurer and reporting year.
+  - name: stg_fcr_search_hits
+    description: Every FCR PDF each search run found, one row per run and URL.
     columns:
       - name: document_id
-        description: The FCR's id.
+        data_tests: [not_null]
+      - name: landed_at
+        description: When the run that found it landed its rows; one value per run, so runs sort in order.
+        data_tests: [not_null]
+
+  - name: stg_fcr_searches
+    description: Every billed SerpAPI search, one row per results page.
+    columns:
+      - name: query
+        data_tests: [not_null]
+
+  - name: stg_fcr_page_reads
+    description: Every disclosures page that loaded, as the query that found its PDFs (page:<url>).
+    columns:
+      - name: query
+        data_tests: [not_null]
+
+  - name: stg_fcr_download_attempts
+    description: Every attempt to fetch an FCR's PDF.
+    columns:
+      - name: outcome
+        data_tests: [{accepted_values: {arguments: {values: [downloaded, failed, rejected]}}}]
+
+  - name: stg_fcr_volume_files
+    description: The FCR PDFs downloaded into the volume, one row per file.
+    columns:
+      - name: volume_path
+        description: The file's path in the volume, /Volumes/<catalog>/<schema>/<volume>/<source>/<document_id>.<file_type>.
         data_tests: [unique, not_null]
-      - name: registered_name
-        description: The company's name on the reference list; empty if it isn't on it.
-      - name: institution
-        description: The company's name as the FCR's title gives it.
-      - name: reporting_year
-        description: The year the FCR reports on.
-      - name: file_url
-        description: Where the FCR PDF was found.
-  - name: stg_fcr_parsed_documents
-    description: The ai_parse_document output of each downloaded FCR, as JSON.
-    columns:
-      - name: document_id
-        data_tests: [unique, not_null, {relationships: {arguments: {to: ref('stg_fcr_documents'), field: document_id}, config: {severity: warn}}}]
-      - name: parsed_content
-        description: The parser's elements (text, headings, tables) with their pages, as JSON.
+      - name: downloaded_at
+        description: When the file arrived (its modified time; a file is never rewritten).
+
   - name: stg_fcr_entities
     description: The reference list of Bermuda entities (insurers and reinsurers), with multi-value columns as arrays.
     columns:

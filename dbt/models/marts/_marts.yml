@@ -1,6 +1,41 @@
 version: 2
 
 models:
+  - name: fcr_search_plan
+    description: >
+      The SerpAPI searches due this run, most promising first - site queries for years a known website is
+      missing, name queries for reference-list entities without the latest year, then generic discovery
+      queries - leaving out any query still waiting after its last run. Read by the search_fcrs task.
+    config:
+      submission_method: serverless_cluster
+      environment_key: fcr_curator
+      environment_dependencies: ["{{ var('fcr_curator_wheel') }}"]
+    columns:
+      - name: priority
+        description: The order to ask the queries in, from 1; the run stops when its budget is spent.
+        data_tests: [unique, not_null]
+      - name: query
+        data_tests: [unique, not_null]
+      - name: reason
+        description: Why it's asked.
+        data_tests: [{accepted_values: {arguments: {values: [missing_year, institution, discovery]}}}]
+      - name: max_pages
+        description: The most results pages the query may use (each costs a search).
+
+  - name: fcr_register
+    description: >
+      The FCR register: one curated FCR per (re)insurer, reporting year and kind, with when its PDF was
+      downloaded. Read by the search_fcrs and download_fcrs tasks.
+    columns:
+      - name: document_id
+        data_tests: [unique, not_null]
+      - name: downloaded_at
+        description: When the PDF arrived in the volume; empty until it's downloaded.
+      - name: download_attempts
+        description: How many times the download task has tried to fetch the PDF.
+      - name: last_download_outcome
+        description: How the latest attempt went - downloaded, failed (couldn't fetch) or rejected (not a PDF).
+
   - name: dim_fcr_companies
     description: >
       FCR coverage by company: every company with a downloaded FCR or on the reference list, with the
