@@ -22,8 +22,8 @@ models:
         data_tests: [unique, not_null, {relationships: {arguments: {to: ref('stg_fcr_documents'), field: document_id}, config: {severity: warn}}}]
       - name: parsed_content
         description: The parser's elements (text, headings, tables) with their pages, as JSON.
-  - name: stg_fcr_reinsurers
-    description: The reference list of Bermuda insurers and reinsurers, with multi-value columns as arrays.
+  - name: stg_fcr_entities
+    description: The reference list of Bermuda entities (insurers and reinsurers), with multi-value columns as arrays.
     columns:
       - name: name
         data_tests: [unique, not_null]

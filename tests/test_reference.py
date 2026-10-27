@@ -1,18 +1,19 @@
 """Tests for the reference list of (re)insurers: loading it, and naming FCRs after its entities."""
 
+import csv
 from pathlib import Path
 
 import pytest
 
-from fcr_curator.reference import (
-    REFERENCE_FILE,
-    ReferenceEntity,
-    entities_from_rows,
-    entity_resolver,
-    load_reference_entities,
-)
+from fcr_curator.reference import ReferenceEntity, entities_from_rows, entity_resolver
 
-REPOSITORY = Path(__file__).resolve().parents[1]
+SEED_FILE = Path(__file__).resolve().parents[1] / "dbt/seeds/bermuda_entities.csv"
+
+
+def load_reference_entities(path: Path) -> list[ReferenceEntity]:
+    """Load entities from a seed CSV, as the pipeline loads the seed table's rows."""
+    with open(path, newline="", encoding="utf-8") as file:
+        return entities_from_rows(csv.DictReader(file))
 
 
 def csv_file(tmp_path: Path, rows: str) -> Path:
@@ -24,7 +25,7 @@ def csv_file(tmp_path: Path, rows: str) -> Path:
 
 def test_entities_come_largest_assets_first_whatever_the_file_order() -> None:
     """Search priority follows assets, so the biggest insurers are searched before the budget runs out."""
-    entities = load_reference_entities(REPOSITORY / REFERENCE_FILE)
+    entities = load_reference_entities(SEED_FILE)
 
     assets = [entity.assets_bn_usd for entity in entities]
     assert assets == sorted(assets, reverse=True)
@@ -39,7 +40,7 @@ def test_file_order_does_not_set_priority(tmp_path: Path) -> None:
 
 def test_every_row_of_the_shipped_list_loads() -> None:
     """The seed list loads in full (one entity per data row), starting with the largest."""
-    path = REPOSITORY / REFERENCE_FILE
+    path = SEED_FILE
     data_rows = len(path.read_text().strip().splitlines()) - 1
 
     entities = load_reference_entities(path)

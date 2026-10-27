@@ -9,7 +9,7 @@ models:
       - name: company
         data_tests: [unique, not_null]
       - name: on_reference_list
-        description: True for companies on the reference list (ref_bermuda_reinsurers).
+        description: True for companies on the reference list (ref_bermuda_entities).
       - name: fcrs
         description: Downloaded FCRs found for the company.
       - name: reporting_years

@@ -19,5 +19,5 @@ select
     coverage.reporting_years,
     coverage.latest_reporting_year
 from coverage
-full outer join {{ ref('stg_fcr_reinsurers') }} as entity
+full outer join {{ ref('stg_fcr_entities') }} as entity
     on entity.name = coverage.company

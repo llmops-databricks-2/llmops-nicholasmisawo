@@ -1,13 +1,13 @@
 version: 2
 
 seeds:
-  - name: bermuda_reinsurers
+  - name: bermuda_entities
     description: >
-      The reference list of Bermuda insurers and reinsurers. Bronze searches for each by name (largest
+      The reference list of Bermuda entities: insurers and reinsurers. Bronze searches for each by name (largest
       assets first) and reads its fcr_pages; silver names every FCR it matches after it (registered_name).
       Multi-value columns separate values with ';'.
     config:
-      alias: ref_bermuda_reinsurers
+      alias: ref_bermuda_entities
       tblproperties: {quality: reference}
       column_types:
         name: string

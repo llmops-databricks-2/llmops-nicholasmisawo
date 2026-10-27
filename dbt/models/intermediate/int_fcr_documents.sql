@@ -10,5 +10,5 @@ select
     fcr.file_url,
     entity.assets_bn_usd
 from {{ ref('stg_fcr_documents') }} as fcr
-left join {{ ref('stg_fcr_reinsurers') }} as entity
+left join {{ ref('stg_fcr_entities') }} as entity
     on entity.name = fcr.registered_name
