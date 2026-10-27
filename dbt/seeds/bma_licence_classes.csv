@@ -1,0 +1,26 @@
+licence_type,business,files_fcr,fcr_search_priority,in_search_scope
+Class 4,general,true,1,true
+Long Term Class E,long_term,true,2,true
+Class 3B,general,true,3,true
+Group,group,true,4,true
+Long Term Class D,long_term,true,5,false
+Long Term Class C,long_term,true,6,false
+Class 3A,general,true,7,false
+Class 1,general,false,,false
+Class 2,general,false,,false
+Class 3,general,false,,false
+Long Term Class A,long_term,false,,false
+Long Term Class B,long_term,false,,false
+Restricted Special Purpose Insurer,special_purpose,false,,false
+Unrestricted Special Purpose Insurer,special_purpose,false,,false
+Collateralized Insurer,special_purpose,false,,false
+Class IGB,innovative,false,,false
+Class IIGB,innovative,false,,false
+Class ILT,innovative,false,,false
+Class IILT,innovative,false,,false
+Broker,intermediary,false,,false
+Agent,intermediary,false,,false
+Manager,intermediary,false,,false
+Salesman,intermediary,false,,false
+Insurance Marketplace Provider,intermediary,false,,false
+Innovative Intermediary - IMP,intermediary,false,,false
