@@ -295,3 +295,15 @@ def test_curate_keeps_one_row_for_a_file_found_by_two_sources() -> None:
     assert [(document["document_id"], document["superseded_ids"]) for document in documents] == [
         ("serpapi_a", ["pages_a"])
     ]
+
+
+def test_one_fcr_per_listed_insurer_and_year_wherever_it_is_hosted() -> None:
+    """An insurer's FCR for a year found on two websites is one report: the preferred copy is kept."""
+    copies = [
+        raw("serpapi_a", "Example Re FCR 2024", "https://www.example-re.com/fcr-2024.pdf", search_rank=1),
+        raw("serpapi_b", "Example Re FCR 2024", "https://mirror.example.org/fcr-2024.pdf", search_rank=4),
+    ]
+
+    [kept] = curate(copies, today=TODAY, resolve_entity=lambda _: "Example Re Ltd.")
+
+    assert (kept["document_id"], kept["superseded_ids"]) == ("serpapi_a", ["serpapi_b"])

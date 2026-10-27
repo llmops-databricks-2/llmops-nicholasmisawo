@@ -19,8 +19,9 @@ models:
 
   - name: int_fcr_register
     description: >
-      The curated FCR register: one FCR per (re)insurer, reporting year and kind, named after the
-      reference list (registered_name), with the volume path its PDF is downloaded to.
+      The curated FCR register: one FCR per insurer on the entity list, reporting year and kind, named
+      after it (registered_name), with the volume path its PDF is downloaded to. FCRs that match no
+      listed insurer are left out.
     config:
       submission_method: serverless_cluster
       environment_key: fcr_curator
@@ -31,7 +32,8 @@ models:
       - name: document_id
         data_tests: [unique, not_null]
       - name: registered_name
-        description: The company's name on the reference list; empty if it isn't on it.
+        description: The insurer's name on the entity list.
+        data_tests: [not_null]
       - name: institution
         description: The company's name as the FCR's title gives it.
       - name: reporting_year
@@ -45,15 +47,17 @@ models:
         data_tests: [unique, not_null]
 
   - name: int_fcr_documents
-    description: One row per downloaded FCR with its company and the company's reference-list details.
+    description: One row per downloaded FCR with the insurer on the entity list it belongs to.
     columns:
       - name: document_id
         data_tests: [unique, not_null]
       - name: company
-        description: The company to show and cite - its reference-list name, else the name its FCR title gives.
+        description: The insurer's name, as the entity list gives it, to show and cite.
         data_tests: [not_null]
-      - name: assets_bn_usd
-        description: Total assets in billions of US dollars, for companies on the reference list.
+      - name: fcr_class
+        description: The licence the insurer files its FCR under.
+      - name: business
+        description: What that licence covers - general, long_term or group.
 
 unit_tests:
   # Fixtures are SQL, since dict rows can't hold arrays; columns the rule ignores are constants

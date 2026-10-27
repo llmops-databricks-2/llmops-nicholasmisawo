@@ -1,30 +1,101 @@
 version: 2
 
 seeds:
-  - name: bermuda_entities
+  - name: bma_insurance_register
     description: >
-      The reference list of Bermuda entities: insurers and reinsurers. Bronze searches for each by name (largest
-      assets first) and reads its fcr_pages; silver names every FCR it matches after it (registered_name).
-      Multi-value columns separate values with ';'.
+      Every insurer the BMA licenses, from its regulated-entities list (Insurance sector), one row per
+      insurer with every licence it holds. Made by fcr_curator.bma_register from a list copied by hand in
+      a browser, since the BMA's robots.txt blocks automated access; refresh it the same way.
     config:
-      alias: ref_bermuda_entities
+      alias: ref_bma_insurance_register
       tblproperties: {quality: reference}
       column_types:
         name: string
-        assets_bn_usd: double
-        domains: string
-        previous_name: string
-        fcr_pages: string
+        bma_name: string
+        licence_types: string
+        liquidation_status: string
+        extracted_on: date
     columns:
       - name: name
-        description: Current name, as searched for and as shown on FCRs, chunks and citations.
+        description: The insurer's name in proper case, as shown on FCRs, chunks and citations.
         data_tests: [unique, not_null]
-      - name: assets_bn_usd
-        description: Total assets in billions of US dollars; sets search priority.
+      - name: bma_name
+        description: The name exactly as the BMA lists it; fcr_entity_details joins on it.
+        data_tests: [unique, not_null]
+      - name: licence_types
+        description: Every licence the insurer holds, e.g. 'Class 4' or 'Class 3A;Long Term Class C' for a composite.
         data_tests: [not_null]
+      - name: liquidation_status
+        description: The BMA's liquidation status, e.g. PROVISIONAL LIQ; empty when not in liquidation.
+      - name: extracted_on
+        description: When the list was copied from the BMA's website.
+        data_tests: [not_null]
+
+  - name: bma_licence_classes
+    description: >
+      What each BMA insurance licence means for the pipeline. FCR filers, per the Insurance (Public
+      Disclosure) Rules 2015, are Class 3A, 3B and 4 insurers, Class C, D and E long-term insurers and
+      insurance groups; a filer without a website only has to send its FCR on written request.
+    config:
+      alias: ref_bma_licence_classes
+      tblproperties: {quality: reference}
+      column_types:
+        licence_type: string
+        business: string
+        files_fcr: boolean
+        fcr_search_priority: int
+        in_search_scope: boolean
+    columns:
+      - name: licence_type
+        description: The licence as the BMA's list names it.
+        data_tests: [unique, not_null]
+      - name: business
+        description: general, long_term, group, special_purpose, innovative or intermediary.
+        data_tests:
+          - accepted_values:
+              arguments: {values: [general, long_term, group, special_purpose, innovative, intermediary]}
+      - name: files_fcr
+        description: True for the licences whose holders must publish an FCR.
+        data_tests: [not_null]
+      - name: fcr_search_priority
+        description: >
+          Order to search FCR filers in, largest carriers first - Class 4, Long Term E, 3B, groups, Long
+          Term D and C, then 3A; empty for licences that don't file.
+      - name: in_search_scope
+        description: >
+          True for the filing licences whose holders are on the entity list and searched for: Class 4,
+          Long Term E, 3B and groups for now. Set it on another filing class to widen the list.
+        data_tests: [not_null]
+
+  - name: fcr_entity_details
+    description: >
+      What we know about an insurer beyond the BMA's list, by its BMA name: where it publishes, other
+      names it goes by, pages that list its FCRs, and its group's size. Sister companies of one group
+      share its domains; their FCRs are told apart by name. Multi-value columns separate values with ';'.
+    config:
+      alias: ref_fcr_entity_details
+      tblproperties: {quality: reference}
+      column_types:
+        bma_name: string
+        display_name: string
+        domains: string
+        aliases: string
+        fcr_pages: string
+        group_assets_bn_usd: double
+    columns:
+      - name: bma_name
+        description: The insurer's name exactly as the BMA lists it.
+        data_tests:
+          - unique
+          - not_null
+          - relationships: {arguments: {to: ref('bma_insurance_register'), field: bma_name}}
+      - name: display_name
+        description: A name to show instead of the proper-cased BMA name, when capitals hide the company's own styling (DaVinci).
       - name: domains
-        description: Hosts the company publishes FCRs on (no paths), used to match FCRs to it.
-      - name: previous_name
-        description: Names before a rebrand; FCRs filed under one get the current name.
+        description: Hosts the insurer's group publishes FCRs on (no paths), used to match FCRs to it.
+      - name: aliases
+        description: Other names for the insurer - former names (Watford Re) and brands (MS Reinsurance); searched too, and FCRs under them get its name.
       - name: fcr_pages
-        description: Full URLs of pages that link to the company's FCRs, read directly by bronze.
+        description: Full URLs of pages that link to the insurer's FCRs, read directly by the search task.
+      - name: group_assets_bn_usd
+        description: Total assets of the insurer's group in billions of US dollars; orders the search within a licence class.

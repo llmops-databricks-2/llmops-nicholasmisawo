@@ -38,7 +38,38 @@ models:
         description: When the file arrived (its modified time; a file is never rewritten).
 
   - name: stg_fcr_entities
-    description: The reference list of Bermuda entities (insurers and reinsurers), with multi-value columns as arrays.
+    description: >
+      The entity list: BMA-licensed insurers whose filing licence is in search scope (Class 4, Long Term
+      E, 3B and groups for now), not in liquidation, with their domains, aliases and pages where known.
+      Searched for by name; every FCR kept is named after one of them.
+    columns:
+      - name: name
+        description: The insurer's name in proper case, as FCRs, chunks and citations show it.
+        data_tests: [unique, not_null]
+      - name: bma_name
+        description: The name exactly as the BMA lists it.
+        data_tests: [unique, not_null]
+      - name: fcr_class
+        description: The licence it files its FCR under; for a composite, its most important one.
+        data_tests: [not_null]
+      - name: business
+        description: What that licence covers - general, long_term or group.
+      - name: fcr_search_priority
+        description: Its licence class's search order (1 is Class 4).
+        data_tests: [not_null]
+
+  - name: stg_bma_insurers
+    description: >
+      Every insurer the BMA licenses, with what its licences mean for FCRs: whether it files one, the
+      class and business it files under, its search priority, and whether it's in search scope.
     columns:
       - name: name
         data_tests: [unique, not_null]
+      - name: files_fcr
+        description: True if any of its licences requires an FCR.
+        data_tests: [not_null]
+      - name: fcr_class
+        description: Its most important filing licence; empty if it doesn't file.
+      - name: in_search_scope
+        description: Files under a licence in search scope and isn't in liquidation, so it's on the entity list.
+        data_tests: [not_null]

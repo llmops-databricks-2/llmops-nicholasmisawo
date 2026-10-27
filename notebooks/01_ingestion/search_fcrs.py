@@ -1,13 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Search for FCRs: SerpAPI, and the disclosures pages on the reference list
+# MAGIC # Search for FCRs: SerpAPI, and the disclosures pages on the entity list
 # MAGIC
 # MAGIC dbt plans the searches first (`fcr_search_plan`, from `search_plan.py`): only queries likely to find
 # MAGIC an FCR we don't have yet, most promising first. This does what dbt can't:
 # MAGIC
 # MAGIC 1. Check the budget: searches left this month, minus a reserve, capped per run
 # MAGIC 2. Ask the plan's queries in order until the budget is spent
-# MAGIC 3. Read the reference list's `fcr_pages` for their PDF links (`sources/pages.py`; costs no searches)
+# MAGIC 3. Read the entity list's `fcr_pages` for their PDF links (`sources/pages.py`; costs no searches)
 # MAGIC 4. Append what happened: every PDF found (`raw_fcr_search_hits`), every search made
 # MAGIC    (`raw_fcr_searches`) and every page read (`raw_fcr_page_reads`). dbt works out the current
 # MAGIC    search results from them, delisting included (`dbt/models/intermediate/int_fcr_search_results.sql`)
@@ -46,7 +46,7 @@ plan = [
     PlannedQuery(row.query, row.reason, row.max_pages)
     for row in spark.table(f"{cfg.full_schema_name}.{SEARCH_PLAN_TABLE}").orderBy("priority").collect()
 ]
-# The disclosures pages to read are the reference list's fcr_pages (the dbt seed ref_bermuda_entities)
+# The disclosures pages to read are the entity list's fcr_pages (dbt's stg_fcr_entities)
 REFERENCE_ENTITIES = entities_from_rows(
     row.asDict() for row in spark.table(f"{cfg.full_schema_name}.{REFERENCE_TABLE}").collect()
 )

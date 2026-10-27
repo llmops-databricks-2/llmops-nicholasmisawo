@@ -17,7 +17,7 @@ PAGE = """
 <a href="/uploads/Accounts-2024.pdf">View</a>
 <a href="/about">About us</a>
 """
-ENTITY = ReferenceEntity("Example Re", 10.0, ("example-re.com",), (), (PAGE_URL,))
+ENTITY = ReferenceEntity("Example Re", domains=("example-re.com",), fcr_pages=(PAGE_URL,))
 
 
 def test_extract_keeps_each_pdf_link_once_made_absolute() -> None:
@@ -59,7 +59,7 @@ class FakeSession:
 
 def test_a_page_that_fails_is_reported_and_the_rest_still_read() -> None:
     """One moved page doesn't stop the others; it's listed in errors and not counted as read."""
-    broken = ReferenceEntity("Broken Re", 5.0, (), (), ("https://broken.example/fcrs",))
+    broken = ReferenceEntity("Broken Re", fcr_pages=("https://broken.example/fcrs",))
 
     read = fetch_page_documents(FakeSession(), [ENTITY, broken])
 

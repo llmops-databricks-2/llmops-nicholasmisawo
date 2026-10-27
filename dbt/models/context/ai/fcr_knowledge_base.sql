@@ -2,10 +2,16 @@
   The serving contract the assistant searches, in the package's knowledge_base shape: one row per
   chunk, with the company as account_key, the reporting year's end as ts, and a citation_url that
   opens the FCR at the cited page. Incremental: only new or changed rows are merged, so the Change
-  Data Feed (which Lakebase follows) carries real changes. By the package's design it never deletes;
-  the orphan test below catches chunks that left upstream.
+  Data Feed (which Lakebase follows) carries real changes. The package's merge never deletes, so the
+  post-hook removes chunks whose FCR left the register (say, its insurer left the entity list); the
+  deletes reach Lakebase through the Change Data Feed too.
 #}
-{{ config(materialized='incremental', incremental_strategy='merge', unique_key='source_key') }}
+{{ config(
+    materialized='incremental',
+    incremental_strategy='merge',
+    unique_key='source_key',
+    post_hook="delete from {{ this }} where source_id not in (select id from {{ ref('fcr_chunks_embedded') }})",
+) }}
 
 {{ dbt_context_engineering.knowledge_base([{
     'relation': ref('fcr_chunks_embedded'),

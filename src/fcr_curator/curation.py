@@ -202,17 +202,17 @@ def _keep_best(documents: list[dict], group_key: Callable[[dict], tuple]) -> lis
 
 
 def _same_report(document: dict) -> tuple:
-    # The kind is part of the key: an insurer's FCR and its annual accounts for one year aren't copies
-    return (
-        document["domain"],
-        dedupe_key(document["institution"] or document["title"]),
-        document["reporting_year"],
-        document["doc_kind"],
-    )
+    # An insurer on the entity list has one report per year, wherever it's hosted; anyone else's are told
+    # apart by website and name. The kind is part of the key: an FCR and annual accounts aren't copies.
+    if document["registered_name"]:
+        whose = (document["registered_name"],)
+    else:
+        whose = (document["domain"], dedupe_key(document["institution"] or document["title"]))
+    return (*whose, document["reporting_year"], document["doc_kind"])
 
 
 def deduplicate(documents: list[dict]) -> list[dict]:
-    """Keep one document per file, then one per (domain, institution, reporting year, kind).
+    """Keep one document per file, then one per insurer (or domain and institution), reporting year and kind.
 
     The same PDF can arrive from several sources (a search and a disclosures page), and the same FCR is
     often online at several URLs. The one kept is: still listed, then the best-ranked, then the first
@@ -231,7 +231,7 @@ def curate(
 ) -> list[dict]:
     """Curate every search-results row: keep PDFs not on an excluded domain, then de-duplicate.
 
-    resolve_entity names each document's insurer as the reference list has it (registered_name).
+    resolve_entity names each document's insurer as the entity list has it (registered_name).
     """
     curated = [curate_document(raw, today=today, resolve_entity=resolve_entity) for raw in raw_documents]
     return deduplicate([d for d in curated if d["file_type"] in file_types and not is_excluded_domain(d["domain"])])

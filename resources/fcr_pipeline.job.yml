@@ -9,7 +9,7 @@
 #   dbt_register              work out the search results, curate them into fcr_register
 #   download_fcrs             download the register's new PDFs; appends every attempt
 #   dbt_context               parse the new PDFs (ai_parse_document), section chunks, embeddings
-#                             -> fcr_knowledge_base, plus the dim_fcr_companies coverage mart
+#                             -> fcr_knowledge_base, plus dim_fcr_entities (FCR coverage per listed insurer)
 #   sync_knowledge_base_to_lakebase  create or refresh the Lakebase copy of fcr_knowledge_base
 #
 # Every stage is incremental or append-only, so re-runs only pick up new or changed FCRs.
@@ -119,7 +119,7 @@ resources:
             commands:
               - dbt deps
               - >-
-                dbt build --select int_fcr_documents+
+                dbt build --select int_fcr_documents+ dim_fcr_entities
                 --vars '{fcr_curator_wheel: ${workspace.artifact_path}/.internal/fcr_curator-0.0.1-py3-none-any.whl}'
             warehouse_id: ${var.warehouse_id}
             catalog: ${var.catalog}

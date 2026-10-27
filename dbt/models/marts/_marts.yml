@@ -36,16 +36,32 @@ models:
       - name: last_download_outcome
         description: How the latest attempt went - downloaded, failed (couldn't fetch) or rejected (not a PDF).
 
-  - name: dim_fcr_companies
+  - name: dim_fcr_entities
     description: >
-      FCR coverage by company: every company with a downloaded FCR or on the reference list, with the
-      reporting years found. A reference-list company with fcrs = 0 has no FCR found yet.
+      One row per insurer on the entity list (BMA Class 4, Long Term E, 3B and groups, not in
+      liquidation), with the FCRs found for it. An insurer with fcrs_found = 0 has none found yet and is
+      still searched for.
     columns:
-      - name: company
+      - name: name
+        description: The insurer's name in proper case, as FCRs, chunks and citations show it.
         data_tests: [unique, not_null]
-      - name: on_reference_list
-        description: True for companies on the reference list (ref_bermuda_entities).
-      - name: fcrs
-        description: Downloaded FCRs found for the company.
+      - name: fcr_class
+        description: The licence it files its FCR under; for a composite, its most important one.
+        data_tests: [not_null]
+      - name: business
+        description: What that licence covers - general, long_term or group.
+        data_tests: [{accepted_values: {arguments: {values: [general, long_term, group]}}}]
+      - name: licence_types
+        description: Every licence it holds.
+      - name: group_assets_bn_usd
+        description: Its group's total assets in billions of US dollars, where known.
+      - name: fcrs_found
+        description: Curated FCRs found for it, one per reporting year.
+      - name: fcrs_downloaded
+        description: Of those, how many are in the volume.
       - name: reporting_years
-        description: The years those FCRs report on.
+        description: The years its FCRs report on; each is published the following year.
+      - name: latest_reporting_year
+        description: The most recent of them.
+      - name: has_fcr
+        description: True once any FCR is found for it.

@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from fcr_curator.search_plan import (
     Coverage,
     QueryHistory,
@@ -12,6 +14,7 @@ from fcr_curator.search_plan import (
     plan_queries,
     query_history,
     search_budget,
+    search_name,
     site_query,
     worst_case_searches,
 )
@@ -22,8 +25,8 @@ SETTINGS = SearchSettings(latest_year=2025, discovery_years=2)
 
 
 def plan(known: Coverage = NOTHING_KNOWN, institutions: tuple[str, ...] = (), history: dict | None = None) -> list:
-    """Plan for latest year 2025, with discovery over 2025 and 2024."""
-    settings = SearchSettings(latest_year=2025, institutions=institutions, discovery_years=2)
+    """Plan for latest year 2025, with discovery over 2025 and 2024; each institution has no aliases."""
+    settings = SearchSettings(latest_year=2025, institutions=tuple((name,) for name in institutions), discovery_years=2)
     return plan_queries(settings, known, history or {}, now=NOW)
 
 
@@ -38,7 +41,7 @@ def test_plan_asks_known_domains_missing_the_latest_year_first() -> None:
     assert all("done.com" not in query.query for query in planned)
 
 
-def test_plan_skips_institutions_silver_already_holds_for_the_latest_year() -> None:
+def test_plan_skips_institutions_the_register_already_holds_for_the_latest_year() -> None:
     """A named institution is searched only until silver has its latest FCR, matched loosely by name."""
     known = Coverage({}, {"Example Re Ltd.": {2025}})
 
@@ -85,12 +88,12 @@ def test_query_history_sums_the_pages_of_each_querys_latest_run() -> None:
     assert query_history(log)["q"] == QueryHistory(datetime(2026, 10, 1, tzinfo=UTC), fcr_results=2)
 
 
-def test_coverage_collects_years_by_domain_and_institution() -> None:
-    """Silver rows with a reporting year count towards their domain and institution; undated ones don't."""
+def test_coverage_collects_years_by_domain_and_registered_name() -> None:
+    """Register rows with a reporting year count towards their domain and insurer; undated ones don't."""
     known = coverage(
         [
-            {"domain": "example-re.com", "institution": "Example Re Ltd.", "reporting_year": 2024},
-            {"domain": "example-re.com", "institution": "Example Re Ltd.", "reporting_year": None},
+            {"domain": "example-re.com", "registered_name": "Example Re Ltd.", "reporting_year": 2024},
+            {"domain": "example-re.com", "registered_name": "Example Re Ltd.", "reporting_year": None},
         ]
     )
 
@@ -126,11 +129,47 @@ def test_discovery_searches_both_names_bermuda_insurers_use() -> None:
     assert any(query.startswith('"solvency and financial condition report"') for query in queries)
 
 
-def test_a_generic_institution_name_in_silver_covers_no_one() -> None:
-    """A silver row named just "Group" mustn't make every "... Group" insurer look covered and go unsearched."""
+def test_a_generic_name_in_the_register_covers_no_one() -> None:
+    """A register row named just "Group" mustn't make every "... Group" insurer look covered and go unsearched."""
     known = Coverage({}, {"Group": {2025}})
 
     queries = [query.query for query in plan(known, institutions=("Arch Capital Group", "Enstar Group"))]
 
     assert institution_query("Arch Capital Group") in queries
     assert institution_query("Enstar Group") in queries
+
+
+def test_a_sister_companys_fcr_doesnt_cover_its_group() -> None:
+    """Legal entities are covered exactly: the subsidiary's FCR leaves its group still to search for."""
+    known = Coverage({}, {"Everest Reinsurance (Bermuda), Ltd.": {2025}})
+
+    queries = [query.query for query in plan(known, institutions=("Everest Group Ltd.",))]
+
+    assert institution_query("Everest Group Ltd.") in queries
+
+
+def test_an_insurer_is_searched_under_each_alias_until_its_latest_fcr_is_found() -> None:
+    """Aliases are searched with the insurer's name, and skipped with it once it's covered."""
+    settings = SearchSettings(latest_year=2025, institutions=(("Somers Re Ltd.", "Watford Re"),), discovery_years=1)
+    covered = Coverage({}, {"Somers Re Ltd.": {2025}})
+
+    due = [query.query for query in plan_queries(settings, NOTHING_KNOWN, {}, now=NOW)]
+    after = [query.query for query in plan_queries(settings, covered, {}, now=NOW)]
+
+    assert {institution_query("Somers Re Ltd."), institution_query("Watford Re")} <= set(due)
+    assert not {institution_query("Somers Re Ltd."), institution_query("Watford Re")} & set(after)
+
+
+@pytest.mark.parametrize(
+    ("name", "searched_as"),
+    [
+        ("Partner Reinsurance Company Ltd.", "Partner Reinsurance"),
+        ("Everest Reinsurance (Bermuda), Ltd.", "Everest Reinsurance (Bermuda)"),
+        ("RenaissanceRe Europe AG", "RenaissanceRe Europe"),
+        ("Antares (Bermuda) Group", "Antares (Bermuda) Group"),  # "Group" is part of a group's name
+    ],
+)
+def test_a_name_is_searched_without_trailing_legal_words(name: str, searched_as: str) -> None:
+    """Reports often leave out "Ltd." or "Company", so the quoted name matches more of them."""
+    assert search_name(name) == searched_as
+    assert f'"{searched_as}"' in institution_query(name)

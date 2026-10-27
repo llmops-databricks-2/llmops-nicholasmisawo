@@ -10,7 +10,9 @@ REGISTER_METADATA_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
         StructField("source", StringType(), True),
-        StructField("registered_name", StringType(), True),  # As the reference list gives it; None if not on it
+        StructField(
+            "registered_name", StringType(), True
+        ),  # The insurer on the entity list (reference.entity_resolver)
         StructField("institution", StringType(), True),  # As the FCR's title gives it
         StructField("domain", StringType(), True),
         StructField("title", StringType(), False),

@@ -1,28 +1,26 @@
-"""The reference list of insurers and reinsurers: who the search task looks for, and the names FCRs get.
+"""The entity list: the insurers the search task looks for, and the names their FCRs get.
 
-The list is a dbt seed (dbt/seeds/bermuda_entities.csv), loaded as the table ref_bermuda_entities,
-which the pipeline reads. Its columns:
+The list is dbt's stg_fcr_entities: the BMA-licensed insurers in search scope (dbt/seeds/
+bma_licence_classes.csv), with what fcr_entity_details.csv adds. Each row has:
 
-- `name`: the insurer's name, as searched for and as shown on its FCRs and chunks (`registered_name`)
-- `assets_bn_usd`: total assets; insurers are searched largest first, so when a run's search budget runs
-  out, it's the smallest that wait for the next run
-- `domains` (optional): websites the insurer publishes on, separated by `;`. Matching on a domain beats
-  matching on a name, since FCR titles often name a subsidiary or nothing at all. Give hosts only, no
-  paths, and don't list shared hosts such as q4cdn.com, which serve many companies.
-- `previous_name` (optional): names before a rebrand, separated by `;`. FCRs filed under one are named
-  after the current `name`, and previous names are searched too, since earlier reports used them.
-- `fcr_pages` (optional): full URLs of pages that link to the company's FCRs, separated by `;`. The search
-  task reads them directly (sources/pages.py), finding FCRs without spending a search.
-
-Swap in a fuller register (such as the BMA's) by editing the seed; no code changes.
+- `name`: the insurer's name in proper case, as searched for and as shown on its FCRs and chunks
+  (`registered_name`)
+- `business`: general, long_term or group. An insurer and its group may share a name, as the BMA lists
+  "Nissan Global Reinsurance, Ltd." and "... (Group)"; an FCR either could have filed goes to the insurer
+- `fcr_search_priority`: its licence class's search order (1 is Class 4), so when a run's search budget
+  runs out, the less important classes wait; within a class, larger groups (`group_assets_bn_usd`) go first
+- `domains`: hosts its group publishes on. Sister companies share them, so a domain narrows an FCR down
+  to a group and the name tells the companies apart
+- `aliases`: former names and brands. They're searched too, and an FCR under one gets the insurer's name
+- `fcr_pages`: pages that link to its FCRs, which the search task reads without spending a search
 """
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from fcr_curator.curation import EntityResolver, institution_key, on_domain, same_institution
+from fcr_curator.curation import MIN_NAME_KEY_CHARS, EntityResolver, institution_key, on_domain, same_institution
 
-REFERENCE_TABLE = "ref_bermuda_entities"  # The seed's table, in the project's schema
+REFERENCE_TABLE = "stg_fcr_entities"  # The entity list's view, in the project's schema
 
 
 @dataclass(frozen=True)
@@ -30,79 +28,123 @@ class ReferenceEntity:
     """An insurer to search for and to name FCRs after."""
 
     name: str
-    assets_bn_usd: float
+    search_priority: int = 1
+    is_group: bool = False
+    group_assets_bn_usd: float | None = None
     domains: tuple[str, ...] = ()
-    previous_names: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
     fcr_pages: tuple[str, ...] = ()
 
     @property
     def names(self) -> tuple[str, ...]:
-        """The current name, then any previous ones."""
-        return (self.name, *self.previous_names)
+        """Its name, then its aliases."""
+        return (self.name, *self.aliases)
+
+    @property
+    def search_order(self) -> tuple:
+        """Most important licence class first, then the larger group, then by name."""
+        return (self.search_priority, -(self.group_assets_bn_usd or 0.0), self.name)
 
 
-def _split(value: str | None) -> tuple[str, ...]:
-    return tuple(part.strip() for part in (value or "").split(";") if part.strip())
+def _values(value: str | Iterable[str] | None) -> tuple[str, ...]:
+    parts = value.split(";") if isinstance(value, str) else (value or ())
+    return tuple(part.strip() for part in parts if part and part.strip())
 
 
-def _parse(row: Mapping, line: int) -> ReferenceEntity:
+def _parse(row: Mapping) -> ReferenceEntity:
     name = (row.get("name") or "").strip()
     if not name:
-        raise ValueError(f"Line {line}: no name")
-    if None in row:  # csv.DictReader puts fields beyond the header under None
-        raise ValueError(f"Line {line} ({name}): more fields than the header; use ';' between values, not ','")
-    domains = tuple(domain.lower() for domain in _split(row.get("domains")))
+        raise ValueError(f"An entity has no name: {dict(row)}")
+    domains = tuple(domain.lower() for domain in _values(row.get("domains")))
     if any("/" in domain for domain in domains):
-        raise ValueError(f"Line {line} ({name}): domains are hosts only, without a path: {domains}")
-    fcr_pages = _split(row.get("fcr_pages"))
+        raise ValueError(f"{name}: domains are hosts only, without a path: {domains}")
+    fcr_pages = _values(row.get("fcr_pages"))
     if any(not page.startswith(("https://", "http://")) for page in fcr_pages):
-        raise ValueError(f"Line {line} ({name}): fcr_pages must be full URLs starting https://: {fcr_pages}")
-    try:
-        return ReferenceEntity(name, float(row["assets_bn_usd"]), domains, _split(row.get("previous_name")), fcr_pages)
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(f"Line {line} ({name}): assets_bn_usd must be a number") from error
+        raise ValueError(f"{name}: fcr_pages must be full URLs starting https://: {fcr_pages}")
+    assets = row.get("group_assets_bn_usd")
+    return ReferenceEntity(
+        name=name,
+        search_priority=int(row.get("fcr_search_priority") or 1),
+        is_group=row.get("business") == "group",
+        group_assets_bn_usd=float(assets) if assets is not None else None,
+        domains=domains,
+        aliases=_values(row.get("aliases")),
+        fcr_pages=fcr_pages,
+    )
 
 
 def entities_from_rows(rows: Iterable[Mapping]) -> list[ReferenceEntity]:
-    """Return the entities in rows (from the seed table), largest assets first.
+    """Return the entities in rows (from stg_fcr_entities), in search order.
 
-    Raises ValueError, naming the row, for a row with no name or no numeric assets, and for a name that
-    repeats another once case, punctuation and legal suffixes are ignored (it would be searched twice).
-    Rows are numbered as CSV lines are, so line 2 is the first company.
+    Raises ValueError for a row with no name, a domain with a path or a page that isn't a URL, and for
+    a name or alias that repeats another once case, punctuation and legal suffixes are ignored (it would
+    be searched twice, and an FCR under it couldn't be told apart). Only an insurer and a group may
+    share a name, as the BMA lists some groups under their insurer's name.
     """
-    entities = [_parse(row, line) for line, row in enumerate(rows, start=2)]
+    entities = [_parse(row) for row in rows]
 
-    seen: dict[str, str] = {}
+    seen: dict[str, tuple[str, ReferenceEntity]] = {}
     for entity in entities:
         for name in entity.names:
             key = institution_key(name)
-            if key in seen:
-                raise ValueError(f"{name!r} repeats {seen[key]!r}")
-            seen[key] = name
+            if key in seen and not _insurer_and_its_group(seen[key][1], entity):
+                raise ValueError(f"{name!r} repeats {seen[key][0]!r}")
+            seen.setdefault(key, (name, entity))
 
-    return sorted(entities, key=lambda entity: entity.assets_bn_usd, reverse=True)
+    return sorted(entities, key=lambda entity: entity.search_order)
+
+
+def _insurer_and_its_group(entity: ReferenceEntity, other: ReferenceEntity) -> bool:
+    return entity.is_group != other.is_group
+
+
+def _names_it_or_shortens_it(name: str, document_name: str) -> bool:
+    # "Everest Re" names "Everest Reinsurance (Bermuda), Ltd.", but "Partner Reinsurance Europe SE" is a
+    # more specific company than "PartnerRe Group" (an Irish one, not on the list)
+    key, document_key = institution_key(name), institution_key(document_name)
+    return len(document_key) >= MIN_NAME_KEY_CHARS and key.startswith(document_key)
+
+
+def _best_name_match(
+    candidates: Iterable[ReferenceEntity], document_names: list[str], *, on_its_domain: bool
+) -> str | None:
+    # On the insurer's own website a name only has to start the same; elsewhere the document must name
+    # the insurer or shorten its name, so a foreign subsidiary's report isn't taken for its group's.
+    # An exact name beats a longer one that merely starts the same: "RenaissanceRe Group"'s own FCR is
+    # the group's, not "Renaissance Reinsurance"'s. Among the rest, the longest, most specific wins, and
+    # between an insurer and a group of the same name, the insurer.
+    matches_name = same_institution if on_its_domain else _names_it_or_shortens_it
+    document_keys = {institution_key(document_name) for document_name in document_names}
+    matches = [
+        (institution_key(name) in document_keys, len(institution_key(name)), not entity.is_group, entity.name)
+        for entity in candidates
+        for name in entity.names
+        if any(matches_name(name, document_name) for document_name in document_names)
+    ]
+    return max(matches)[-1] if matches else None
 
 
 def entity_resolver(entities: list[ReferenceEntity]) -> EntityResolver:
     """Return a function that names a curated document's insurer as the list has it, or None.
 
-    A document on one of an insurer's domains is that insurer's. Otherwise its institution or title is
-    matched against each insurer's current and previous names (see curation.same_institution), and if
-    several match, the longest, most specific name wins: "Arch Capital Group" over "Arch". Either way the
-    document gets the current name.
+    A document on a group's domain is one of that group's companies: the one its institution or title
+    names, or the only one if the group has just one. Elsewhere it's the listed insurer its institution
+    names, in full or shortened ("Everest Re"); a longer, more specific name is another company, such as
+    a group's foreign subsidiary. A document naming no listed insurer gets None, which leaves it out of
+    the register, and so does one on a shared domain that doesn't say which sister company it is.
     """
 
     def resolve(document: dict) -> str | None:
-        for entity in entities:
-            if any(on_domain(document.get("domain"), domain) for domain in entity.domains):
-                return entity.name
-        document_names = [document.get("institution") or "", document.get("title") or ""]
-        matches = [
-            (len(institution_key(name)), entity.name)
-            for entity in entities
-            for name in entity.names
-            if any(same_institution(name, document_name) for document_name in document_names)
+        document_names = [name for name in (document.get("institution"), document.get("title")) if name]
+        group_on_domain = [
+            entity for entity in entities if any(on_domain(document.get("domain"), domain) for domain in entity.domains)
         ]
-        return max(matches)[1] if matches else None
+        if group_on_domain:
+            if match := _best_name_match(group_on_domain, document_names, on_its_domain=True):
+                return match
+            if len(group_on_domain) == 1:
+                return group_on_domain[0].name
+        institution = [document["institution"]] if document.get("institution") else []
+        return _best_name_match(entities, institution, on_its_domain=False)
 
     return resolve

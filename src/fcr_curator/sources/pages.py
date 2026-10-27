@@ -1,4 +1,4 @@
-"""Find FCR PDFs by reading the pages that link to them, listed in the reference file's `fcr_pages`.
+"""Find FCR PDFs by reading the pages that link to them, listed in the entity list's `fcr_pages`.
 
 A company's disclosures page usually links every FCR it has published. Reading it costs no SerpAPI
 searches and finds older years that search ranks poorly. Each PDF link becomes a search-results row like a search
