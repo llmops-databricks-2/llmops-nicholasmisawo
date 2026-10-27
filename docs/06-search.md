@@ -10,9 +10,9 @@ env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python
 
 | Step | Module | What it does |
 |---|---|---|
-| Query rewriting | `query_rewriting.py` | The chat model rewrites the question in FCR terms and pulls out filters ((re)insurer, year; "last year" resolved against today) |
+| Query rewriting | `query_rewriting.py` | The chat model rewrites the question in FCR terms and pulls out filters ((re)insurer, year, licence class; "last year" resolved against today; a class not on the entity list is dropped) |
 | Semantic search | `search.py` | pgvector cosine distance (`<=>`); cosine because the embeddings aren't normalised |
-| Filters | `search.py` | (Re)insurer matched loosely on the company (`account_key`) and the citation URL, which holds the domain (`Wilton Re` finds `wiltonre.bm`); year from `ts` |
+| Filters | `search.py` | (Re)insurer matched loosely on the company (`account_key`) and the citation URL, which holds the domain (`Wilton Re` finds `wiltonre.bm`); year from `ts`; licence class (`Class 4`, `Long Term Class E`, `Class 3B`, `Group`) from `classification`, exactly |
 | Keyword search | `search.py` | Postgres full-text search for any of the words, ranked by `ts_rank_cd` |
 | Hybrid search | `search.py` | Both rankings fused with Reciprocal Rank Fusion (k = 60) |
 | Reranking | `reranking.py` | One chat call reorders the 20 hybrid candidates by usefulness, keeping the top 5 |

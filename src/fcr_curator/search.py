@@ -1,8 +1,8 @@
 """Search the Lakebase copy of the FCR knowledge base: semantic, keyword and hybrid, each with filters.
 
 The table has the dbt_context_engineering knowledge_base shape: source_key, text, account_key (the
-company), ts (31 December of the reporting year), citation_url (the FCR opened at the chunk's page) and
-embedding.
+company), ts (31 December of the reporting year), citation_url (the FCR opened at the chunk's page),
+classification (the insurer's FCR licence class) and embedding.
 
 
 - semantic: pgvector cosine distance (<=>). The embeddings aren't normalised, so cosine, not inner product.
@@ -28,8 +28,11 @@ RRF_K = 60  # The usual Reciprocal Rank Fusion constant: damps the weight of the
 # The page is read back from the citation's #page=N, so a hit and its citation can't disagree
 HIT_COLUMNS = sql.SQL(
     "source_key, text, account_key, extract(year from ts)::int,"
-    " substring(citation_url from '#page=([0-9]+)$')::int, citation_url"
+    " substring(citation_url from '#page=([0-9]+)$')::int, citation_url, classification"
 )
+# The licence classes on the entity list (in_search_scope in dbt/seeds/bma_licence_classes.csv): the
+# values classification takes. Class 4 and 3B write general business, Long Term Class E long-term
+FCR_CLASSES = ("Class 4", "Long Term Class E", "Class 3B", "Group")
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,7 @@ class SearchHit:
     reporting_year: int | None
     page: int | None  # As printed in the PDF, counted from 1
     citation_url: str | None  # The FCR, opened at that page
+    fcr_class: str | None = None  # The insurer's FCR licence class, e.g. "Class 4"
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ class SearchFilters:
 
     institution: str | None = None
     reporting_year: int | None = None
+    fcr_class: str | None = None  # One of FCR_CLASSES
 
     def where(self) -> tuple[sql.Composable, list]:
         """Return the SQL condition for these filters and its parameters."""
@@ -66,6 +71,9 @@ class SearchFilters:
         if self.reporting_year:
             conditions.append(sql.SQL("extract(year from ts) = %s"))
             params.append(self.reporting_year)
+        if self.fcr_class:
+            conditions.append(sql.SQL("classification = %s"))
+            params.append(self.fcr_class)
         return sql.SQL(" AND ").join(conditions), params
 
 

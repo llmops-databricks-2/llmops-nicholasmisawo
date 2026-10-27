@@ -6,7 +6,8 @@
 -- so they're only in the Python notebook.
 --
 -- The knowledge base (dbt's fcr_knowledge_base) has: source_key, text, account_key (the company), ts
--- (31 December of the reporting year), citation_url (the FCR opened at the chunk's page) and embedding.
+-- (31 December of the reporting year), citation_url (the FCR opened at the chunk's page), classification
+-- (the insurer's FCR licence class: Class 4, Long Term Class E, Class 3B or Group) and embedding.
 -- system.ai.gte-large-en is the model behind course_ops.gateway.embed (the same text embeds identically
 -- through both), so a question embedded here can be compared with the stored embeddings.
 
@@ -65,3 +66,10 @@ SELECT kb.account_key AS company, extract(year from kb.ts) AS reporting_year, kb
 FROM (SELECT * FROM semantic UNION ALL SELECT * FROM keyword) AS ranked JOIN filtered AS kb USING (source_key)
 GROUP BY kb.source_key, kb.account_key, kb.ts, kb.citation_url, kb.text
 ORDER BY rrf_score DESC LIMIT 5;
+
+-- 5. Keyword search limited to a licence class: how Class 4 (re)insurers describe catastrophe risk
+-- Where: Lakebase SQL editor. Change the class to 'Long Term Class E', 'Class 3B' or 'Group' to compare.
+SELECT account_key AS company, extract(year from ts) AS reporting_year, citation_url, left(text, 100) AS excerpt
+FROM nicholasmisawo.fcr_knowledge_base_lakebase_dev, websearch_to_tsquery('english', 'catastrophe or risk or exposure') AS words
+WHERE classification = 'Class 4' AND to_tsvector('english', text) @@ words
+ORDER BY ts_rank_cd(to_tsvector('english', text), words) DESC LIMIT 10;

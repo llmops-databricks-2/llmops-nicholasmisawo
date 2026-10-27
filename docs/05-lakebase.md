@@ -15,7 +15,7 @@ The `sync_knowledge_base_to_lakebase` task keeps a Lakebase copy of dbt's `fcr_k
 |---|---|
 | Unity Catalog name | `llmops_dev.nicholasmisawo.fcr_knowledge_base_lakebase_dev` (shown as a *foreign* table) |
 | Postgres table | `nicholasmisawo.fcr_knowledge_base_lakebase_dev` in database `databricks_postgres` (schema `nicholasmisawo`, not `public`) |
-| Columns | `source_key`, `text`, `account_key` (company), `ts` (reporting year end), `citation_url` (the FCR at the cited page), `embedding` |
+| Columns | `source_key`, `text`, `account_key` (company), `ts` (reporting year end), `citation_url` (the FCR at the cited page), `classification` (the insurer's FCR licence class), `embedding` |
 | Primary key | `source_key` |
 | `embedding` | pgvector `vector(1024)`, so Postgres searches it directly |
 | Scheduling | `TRIGGERED`: the first run creates it, later runs refresh only what changed (Change Data Feed) and wait |

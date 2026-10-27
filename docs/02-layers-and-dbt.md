@@ -3,8 +3,7 @@
 ## The layers
 
 A file lands untouched; a parser makes it readable; chunking and embedding make it retrievable; one
-schema makes it answerable. The dbt project is laid out like dbt Labs'
-[jaffle-logistics](https://github.com/dbt-labs/jaffle-logistics) example, which maps onto those layers:
+schema makes it answerable.
 
 | Layer | Meaning | Where | Tables |
 |---|---|---|---|
@@ -13,14 +12,13 @@ schema makes it answerable. The dbt project is laid out like dbt Labs'
 | **Silver** | Retrievable | dbt `context/` | `fcr_parsed_documents` (parser output) → `fcr_parsed_hashed` → `chunk_fcr_sections` → `fcr_chunks_meta` |
 | **Gold** | Answerable | dbt `context/ai/`, `marts/` | `fcr_chunk_embeddings` → **`fcr_knowledge_base`** (copied to Lakebase as `fcr_knowledge_base_lakebase_<target>`); `dim_fcr_entities` |
 
-Reference data, as dbt seeds (`dbt/seeds/`): **`ref_bma_insurance_register`**, every insurer the BMA
-licenses; **`ref_bma_licence_classes`**, which licences file an FCR and which are searched; and
+Reference data, as dbt seeds (`dbt/seeds/`): **`ref_bma_insurance_register`**, list of insuers and reinsurers the BMA
+licenses adopted from the BMA website; **`ref_bma_licence_classes`**, which licences file an FCR and which are searched; and
 **`ref_fcr_entity_details`**, what we know beyond the BMA's list (domains, aliases, pages). Together they
 make the entity list, `stg_fcr_entities` ([03 Data pipeline](03-data-pipeline.md#the-entity-list)).
 
 **Naming.** Raw, bronze, silver and gold are layers of meaning, not table prefixes. Tables Python lands
-start with `raw_` (dbt reads them as sources; the names live in `src/fcr_curator/tables.py`); dbt names
-its models the jaffle-logistics way (`stg_`, `int_`, chain names, `dim_`); and job tasks and notebooks are
+start with `raw_` (dbt reads them as sources; the names live in `src/fcr_curator/tables.py`); and job tasks and notebooks are
 named for what they do (`dbt_search_plan`, `search_fcrs`, `dbt_register`, `download_fcrs`, `dbt_context`).
 
 **What stays in Python, and why.** dbt rebuilds tables from data; it isn't meant to call the outside
@@ -74,7 +72,7 @@ macros/          fcr_volume.sql          the volume's name, path and file listin
 | Package piece | Used? | Why |
 |---|---|---|
 | `content_hash` | Yes (`fcr_parsed_hashed`) | Tells changed parses from unchanged ones |
-| `knowledge_base` | Yes (`fcr_knowledge_base`) | One serving shape with a first-class `citation_url`, here the FCR opened at the cited page (`#page=N`); incremental, only new or changed rows |
+| `knowledge_base` | Yes (`fcr_knowledge_base`) | One serving shape with a first-class `citation_url`, here the FCR opened at the cited page (`#page=N`), and a `classification` slot, here the insurer's FCR licence class; incremental, only new or changed rows. Other metadata stays upstream: join `source_id` to `fcr_chunks_meta.id`, or `account_key` to `stg_fcr_entities.name` |
 | `chunk` | No: **our section chunker**, as a Python model | It packs units by token count; ours follows the FCR's sections and measured far better ([04 Chunking](04-chunking.md)) |
 | `embed` | No: **a Python model on `course_ops.gateway.embed`** | Its Databricks version is SQL `ai_query`, which can't reach a model service the workspace created |
 | `attach_metadata` | No: plain SQL join (`fcr_chunks_meta`) | Its output keeps only the package's chunk columns, which would drop `page_id`, needed for citations |

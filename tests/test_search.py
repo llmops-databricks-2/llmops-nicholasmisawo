@@ -22,6 +22,14 @@ def test_filters_match_institution_loosely_and_year_exactly() -> None:
     assert params == ["%wiltonre%", 2024]
 
 
+def test_a_class_filter_matches_the_knowledge_bases_classification_exactly() -> None:
+    """A licence class limits search to chunks of insurers holding it, compared as given."""
+    where, params = SearchFilters(fcr_class="Class 4").where()
+
+    assert "classification = %s" in where.as_string(None)
+    assert params == ["Class 4"]
+
+
 def test_any_word_query_matches_any_word_and_drops_punctuation() -> None:
     """Every word is an alternative, so a chunk needs only one of them to match."""
     assert any_word_query("BSCR ratio, ECR?") == "BSCR or ratio or ECR"
