@@ -14,7 +14,7 @@
 # MAGIC Run it from your machine, not as a job: it connects to Postgres with psycopg, whose compiled library
 # MAGIC aborts Python on serverless job compute.
 # MAGIC
-# MAGIC     env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_knowledge_base.py
+# MAGIC     env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/02_retrieval/search_knowledge_base.py
 
 # COMMAND ----------
 
