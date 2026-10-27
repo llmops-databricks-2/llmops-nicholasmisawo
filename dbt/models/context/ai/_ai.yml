@@ -4,7 +4,8 @@ models:
   - name: fcr_chunk_embeddings
     description: >
       One 1,024-dimension gte-large-en-v1.5 vector per chunk text, from course_ops.gateway.embed through
-      the Unity Gateway API. Reuses any vector already made for the same id and content hash.
+      the Unity Gateway API. Incremental: only chunks with no vector yet for their id and content
+      hash are embedded.
     config:
       submission_method: serverless_cluster
       environment_key: fcr_curator

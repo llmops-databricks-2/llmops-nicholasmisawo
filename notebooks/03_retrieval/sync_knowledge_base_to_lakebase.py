@@ -1,9 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Sync the searchable chunks to Lakebase
+# MAGIC # Sync the knowledge base to Lakebase
 # MAGIC
-# MAGIC Copies `gold_fcr_chunks_by_section` (chunks, metadata and embeddings) into the Lakebase Postgres
-# MAGIC database as `<schema>.fcr_chunks_<env>`, with `embedding` as a pgvector `vector(1024)` column.
+# MAGIC Copies dbt's `fcr_knowledge_base` (chunks, company, year, page citation and embedding) into the
+# MAGIC Lakebase Postgres database as `<schema>.fcr_knowledge_base_lakebase_<env>`, with `embedding` as a pgvector
+# MAGIC `vector(1024)` column, keyed by `source_key`.
 # MAGIC
 # MAGIC First run: create the synced table, which copies every row. Later runs: refresh it, copying only
 # MAGIC what changed, and wait for it to finish (`lakebase.py`). A failed sync fails this task.
@@ -20,8 +21,8 @@ from databricks.sdk.runtime import dbutils
 from loguru import logger
 
 from fcr_curator.config import load_config
-from fcr_curator.data_processor import SEARCH_CHUNKS_TABLE
 from fcr_curator.lakebase import sync_to_lakebase, synced_table_name, synced_table_spec
+from fcr_curator.tables import KNOWLEDGE_BASE_TABLE
 
 # COMMAND ----------
 # Settings
@@ -30,7 +31,7 @@ dbutils.widgets.text("env", "dev")
 env = dbutils.widgets.get("env")
 cfg = load_config("../../project_config.yml", env=env)
 
-SOURCE_TABLE = f"{cfg.full_schema_name}.{SEARCH_CHUNKS_TABLE}"
+SOURCE_TABLE = f"{cfg.full_schema_name}.{KNOWLEDGE_BASE_TABLE}"
 SYNCED_TABLE = synced_table_name(cfg, env)
 
 # COMMAND ----------

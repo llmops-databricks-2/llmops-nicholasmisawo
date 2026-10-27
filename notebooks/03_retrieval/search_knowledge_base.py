@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Search the FCR chunks in Lakebase
+# MAGIC # Search the FCR knowledge base in Lakebase
 # MAGIC
 # MAGIC One question, taken through each retrieval technique in turn so the effect of each shows:
 # MAGIC
@@ -14,7 +14,7 @@
 # MAGIC Run it from your machine, not as a job: it connects to Postgres with psycopg, whose compiled library
 # MAGIC aborts Python on serverless job compute.
 # MAGIC
-# MAGIC     env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_fcr_chunks.py
+# MAGIC     env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_knowledge_base.py
 
 # COMMAND ----------
 
@@ -51,7 +51,7 @@ def show(title: str, hits: list[SearchHit]) -> None:
     """Print the top hits of one search, one line each."""
     print(f"\n{title}")
     for rank, hit in enumerate(hits[:TOP_K], start=1):
-        print(f"  {rank}. {hit.institution} {hit.reporting_year} page {hit.page} | {hit.text[:90]!r}")
+        print(f"  {rank}. {hit.company} {hit.reporting_year} page {hit.page} | {hit.text[:90]!r}")
 
 
 # COMMAND ----------

@@ -6,7 +6,7 @@ from fcr_curator.search import SearchHit
 
 def hits(count: int) -> list[SearchHit]:
     """Build count hits with ids h1, h2, ..."""
-    return [SearchHit(f"h{number}", "x" * 2000, "Example Re", 2024, 0, None) for number in range(1, count + 1)]
+    return [SearchHit(f"h{number}", "x" * 2000, "Example Re", 2024, 1, None) for number in range(1, count + 1)]
 
 
 def replying(reply: str, prompts: list[str] | None = None) -> object:

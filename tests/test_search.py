@@ -5,7 +5,7 @@ from fcr_curator.search import SearchFilters, SearchHit, any_word_query, recipro
 
 def hit(hit_id: str) -> SearchHit:
     """Build a search hit with only an id that matters."""
-    return SearchHit(hit_id, "text", "Example Re", 2024, 0, "https://x.com/a.pdf")
+    return SearchHit(hit_id, "text", "Example Re", 2024, 1, "https://x.com/a.pdf#page=1")
 
 
 def test_filters_without_values_match_everything() -> None:

@@ -1,11 +1,16 @@
-"""Search the Lakebase copy of the FCR chunks: semantic, keyword and hybrid, each with metadata filters.
+"""Search the Lakebase copy of the FCR knowledge base: semantic, keyword and hybrid, each with filters.
+
+The table has the dbt_context_engineering knowledge_base shape: source_key, text, account_key (the
+company), ts (31 December of the reporting year), citation_url (the FCR opened at the chunk's page) and
+embedding.
+
 
 - semantic: pgvector cosine distance (<=>). The embeddings aren't normalised, so cosine, not inner product.
 - keyword: Postgres full-text search for any of the query's words, ranked by ts_rank_cd. Catches exact
   terms (BSCR, ECR, a figure) that embeddings blur.
 - hybrid: both, fused with Reciprocal Rank Fusion, which needs only ranks, not comparable scores.
 
-The synced table belongs to the sync, so it has no search indexes. Exact scans over ~18k chunks take
+The synced table belongs to the sync, so it has no search indexes. Exact scans over ~20k chunks take
 about 0.1s when filtered and a few seconds for an unfiltered keyword search.
 """
 
@@ -20,25 +25,23 @@ from fcr_curator.curation import institution_key
 
 DEFAULT_LIMIT = 20
 RRF_K = 60  # The usual Reciprocal Rank Fusion constant: damps the weight of the very top ranks
-# A hit is named after its reference-list entity when it has one, else as its title gives it
-HIT_COLUMNS = sql.SQL("id, text, coalesce(registered_name, institution), reporting_year, page_id, file_url")
+# The page is read back from the citation's #page=N, so a hit and its citation can't disagree
+HIT_COLUMNS = sql.SQL(
+    "source_key, text, account_key, extract(year from ts)::int,"
+    " substring(citation_url from '#page=([0-9]+)$')::int, citation_url"
+)
 
 
 @dataclass(frozen=True)
 class SearchHit:
     """One chunk a search returned, with what's needed to cite it."""
 
-    id: str
+    id: str  # The knowledge base's source_key
     text: str
-    institution: str | None
+    company: str | None
     reporting_year: int | None
-    page_id: int | None  # Counted from 0, as ai_parse_document numbers pages
-    file_url: str | None
-
-    @property
-    def page(self) -> int | None:
-        """The page number as printed in the PDF, counted from 1."""
-        return None if self.page_id is None else self.page_id + 1
+    page: int | None  # As printed in the PDF, counted from 1
+    citation_url: str | None  # The FCR, opened at that page
 
 
 @dataclass(frozen=True)
@@ -52,17 +55,16 @@ class SearchFilters:
         """Return the SQL condition for these filters and its parameters."""
         conditions, params = [sql.SQL("TRUE")], []
         if self.institution:
-            # Titles give messy names (wiltonre.bm, 2024 Group), so the key is matched against the reference
-            # name, institution, domain and title together
+            # The company name isn't always clean (wiltonre.bm), so the key is matched against the company
+            # and the citation URL, which holds the domain and often the company in its filename
             conditions.append(
                 sql.SQL(
-                    "regexp_replace(lower(concat_ws(' ', registered_name, institution, domain, title)),"
-                    " '[^a-z0-9]', '', 'g') LIKE %s"
+                    "regexp_replace(lower(concat_ws(' ', account_key, citation_url)), '[^a-z0-9]', '', 'g') LIKE %s"
                 )
             )
             params.append(f"%{institution_key(self.institution)}%")
         if self.reporting_year:
-            conditions.append(sql.SQL("reporting_year = %s"))
+            conditions.append(sql.SQL("extract(year from ts) = %s"))
             params.append(self.reporting_year)
         return sql.SQL(" AND ").join(conditions), params
 
@@ -87,7 +89,7 @@ def reciprocal_rank_fusion(rankings: list[list[SearchHit]], limit: int = DEFAULT
 
 
 class ChunkSearch:
-    """Searches one synced chunks table over an open Lakebase connection."""
+    """Searches the synced knowledge base table over an open Lakebase connection."""
 
     def __init__(self, connection: psycopg.Connection, table: str) -> None:
         self.connection = connection

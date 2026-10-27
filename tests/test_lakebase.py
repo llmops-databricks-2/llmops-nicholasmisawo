@@ -16,7 +16,7 @@ from fcr_curator.config import ProjectConfig
 from fcr_curator.lakebase import endpoint_path, sync_to_lakebase, synced_table_name, synced_table_spec
 
 CONFIG = ProjectConfig.from_yaml(str(Path(__file__).resolve().parents[1] / "project_config.yml"), "dev")
-SOURCE = "llmops_dev.nicholasmisawo.gold_fcr_chunks_by_section"
+SOURCE = "llmops_dev.nicholasmisawo.fcr_knowledge_base"
 
 
 class FakeWorkspace:
@@ -57,16 +57,16 @@ class FakeWorkspace:
 
 
 def test_synced_table_name_keeps_environments_apart() -> None:
-    """Every environment shares one Lakebase database, so the environment is part of the name."""
-    assert synced_table_name(CONFIG, "dev") == "llmops_dev.nicholasmisawo.fcr_chunks_dev"
+    """The name says it's the Lakebase copy, and names the environment, since all share one database."""
+    assert synced_table_name(CONFIG, "dev") == "llmops_dev.nicholasmisawo.fcr_knowledge_base_lakebase_dev"
 
 
-def test_synced_table_spec_keys_by_id_and_stores_embeddings_as_vectors() -> None:
-    """Chunks are keyed by id, and the embedding arrives in Postgres as a pgvector vector(1024)."""
+def test_synced_table_spec_keys_by_source_key_and_stores_embeddings_as_vectors() -> None:
+    """Knowledge base rows are keyed by source_key, and the embedding arrives as a pgvector vector(1024)."""
     spec = synced_table_spec(CONFIG, SOURCE)
 
     assert spec.source_table_full_name == SOURCE
-    assert spec.primary_key_columns == ["id"]
+    assert spec.primary_key_columns == ["source_key"]
     [override] = spec.type_overrides
     assert (override.column_name, override.size) == ("embedding", 1024)
     assert override.pg_type == SyncedTableSyncedTableSpecPgSpecificType.PG_SPECIFIC_TYPE_VECTOR
@@ -86,8 +86,11 @@ def test_sync_to_lakebase_creates_a_missing_synced_table() -> None:
     """The first run creates the synced table, which copies every row."""
     workspace = FakeWorkspace()
 
-    assert sync_to_lakebase(workspace, "c.s.fcr_chunks_dev", synced_table_spec(CONFIG, SOURCE)) == "created"
-    assert workspace.created == ["c.s.fcr_chunks_dev"]
+    assert (
+        sync_to_lakebase(workspace, "c.s.fcr_knowledge_base_lakebase_dev", synced_table_spec(CONFIG, SOURCE))
+        == "created"
+    )
+    assert workspace.created == ["c.s.fcr_knowledge_base_lakebase_dev"]
     assert workspace.refreshed == []
 
 
@@ -95,7 +98,10 @@ def test_sync_to_lakebase_refreshes_an_existing_synced_table() -> None:
     """Later runs refresh the existing sync pipeline and wait for it, instead of creating another."""
     workspace = FakeWorkspace(existing_pipeline_id="pipeline-1")
 
-    assert sync_to_lakebase(workspace, "c.s.fcr_chunks_dev", synced_table_spec(CONFIG, SOURCE)) == "refreshed"
+    assert (
+        sync_to_lakebase(workspace, "c.s.fcr_knowledge_base_lakebase_dev", synced_table_spec(CONFIG, SOURCE))
+        == "refreshed"
+    )
     assert workspace.refreshed == ["pipeline-1"]
     assert workspace.created == []
 
@@ -105,7 +111,7 @@ def test_sync_to_lakebase_fails_when_creating_the_synced_table_fails() -> None:
     workspace = FakeWorkspace(created_state=SyncedTableState.SYNCED_TABLE_OFFLINE_FAILED)
 
     with pytest.raises(RuntimeError, match="extension missing"):
-        sync_to_lakebase(workspace, "c.s.fcr_chunks_dev", synced_table_spec(CONFIG, SOURCE))
+        sync_to_lakebase(workspace, "c.s.fcr_knowledge_base_lakebase_dev", synced_table_spec(CONFIG, SOURCE))
 
 
 def test_sync_to_lakebase_fails_when_a_refresh_fails() -> None:
@@ -113,7 +119,7 @@ def test_sync_to_lakebase_fails_when_a_refresh_fails() -> None:
     workspace = FakeWorkspace(existing_pipeline_id="pipeline-1", refresh_state=UpdateInfoState.FAILED)
 
     with pytest.raises(RuntimeError, match="FAILED"):
-        sync_to_lakebase(workspace, "c.s.fcr_chunks_dev", synced_table_spec(CONFIG, SOURCE))
+        sync_to_lakebase(workspace, "c.s.fcr_knowledge_base_lakebase_dev", synced_table_spec(CONFIG, SOURCE))
 
 
 def test_endpoint_path_points_at_the_projects_primary_compute() -> None:
