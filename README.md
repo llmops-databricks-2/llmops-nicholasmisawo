@@ -36,6 +36,7 @@ each stage are in [`docs/`](docs/README.md):
 | [02 Chunking](docs/02-chunking.md) | Two chunking strategies compared, boundaries, the embedding window |
 | [03 Lakebase](docs/03-lakebase.md) | Embeddings and the synced pgvector table |
 | [04 Search](docs/04-search.md) | Filtered, keyword and hybrid search, reranking, rewriting, token budget |
+| [05 Layers and dbt](docs/05-layers.md) | Raw, bronze, silver, gold; what dbt builds; migration phases |
 | [Context engineering](docs/context-engineering.md) | Every strategy that shapes what the model sees |
 | [Environment](docs/environment.md) | Resources, model services, environments, CI |
 
@@ -78,6 +79,7 @@ notebooks/
   01_ingestion/      bronze (search) and silver (curate, download)
   02_processing/     parse, chunk, embed, compare chunking strategies
   03_retrieval/      Lakebase sync, search walkthrough, UI search queries (search_examples.sql)
+dbt/                 dbt project (own environment): seed, staging, intermediate, context, marts
 resources/           the bundle's job definition
 tests/               unit tests, one file per module
 docs/                design and findings

@@ -30,7 +30,7 @@ spends searches only where a new FCR is likely (`search_plan.py`):
 | 2. `institution` | `"<name>" "financial condition report" filetype:pdf` | A named (re)insurer (`SearchSettings.institutions`) lacks the latest year | 1 |
 | 3. `discovery` | Three templates for each of the last 3 reporting years: "financial condition report" Bermuda, the same with "Bermuda Monetary Authority", and "solvency and financial condition report" Bermuda | Always; the only way to find new domains | 2 |
 
-The `institution` names come from **`reference/bermuda_reinsurers.csv`** (`name`, `assets_bn_usd`), loaded by
+The `institution` names come from the reference list, the dbt seed **`dbt/seeds/bermuda_reinsurers.csv`** (table `ref_bermuda_reinsurers`, tested by dbt), loaded by
 `reference.py` and searched **largest assets first**, so if a run's budget runs out, the smallest wait.
 The file is a seed list of the top 20 Bermuda reinsurers; a fuller register (such as the BMA's, with
 licence classes) can replace it without code changes. A name is matched to silver after removing legal
