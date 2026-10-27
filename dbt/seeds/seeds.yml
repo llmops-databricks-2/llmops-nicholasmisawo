@@ -1,0 +1,30 @@
+version: 2
+
+seeds:
+  - name: bermuda_reinsurers
+    description: >
+      The reference list of Bermuda insurers and reinsurers. Bronze searches for each by name (largest
+      assets first) and reads its fcr_pages; silver names every FCR it matches after it (registered_name).
+      Multi-value columns separate values with ';'.
+    config:
+      alias: ref_bermuda_reinsurers
+      tblproperties: {quality: reference}
+      column_types:
+        name: string
+        assets_bn_usd: double
+        domains: string
+        previous_name: string
+        fcr_pages: string
+    columns:
+      - name: name
+        description: Current name, as searched for and as shown on FCRs, chunks and citations.
+        data_tests: [unique, not_null]
+      - name: assets_bn_usd
+        description: Total assets in billions of US dollars; sets search priority.
+        data_tests: [not_null]
+      - name: domains
+        description: Hosts the company publishes FCRs on (no paths), used to match FCRs to it.
+      - name: previous_name
+        description: Names before a rebrand; FCRs filed under one get the current name.
+      - name: fcr_pages
+        description: Full URLs of pages that link to the company's FCRs, read directly by bronze.

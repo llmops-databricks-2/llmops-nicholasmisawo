@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from fcr_curator.reference import REFERENCE_FILE, ReferenceEntity, entity_resolver, load_reference_entities
+from fcr_curator.reference import (
+    REFERENCE_FILE,
+    ReferenceEntity,
+    entities_from_rows,
+    entity_resolver,
+    load_reference_entities,
+)
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 
@@ -137,3 +143,21 @@ def test_a_previous_name_that_repeats_another_entity_fails(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="repeats"):
         load_reference_entities(path)
+
+
+def test_rows_from_the_seed_table_load_like_the_csv() -> None:
+    """Table rows give empty cells as None and assets as numbers; they load the same as CSV rows."""
+    rows = [
+        {"name": "Small Re", "assets_bn_usd": 1.5, "domains": None, "previous_name": None, "fcr_pages": None},
+        {
+            "name": "Large Re",
+            "assets_bn_usd": 30.0,
+            "domains": "large-re.com",
+            "previous_name": None,
+            "fcr_pages": None,
+        },
+    ]
+
+    entities = entities_from_rows(rows)
+
+    assert [(entity.name, entity.domains) for entity in entities] == [("Large Re", ("large-re.com",)), ("Small Re", ())]

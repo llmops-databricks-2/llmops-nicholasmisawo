@@ -16,11 +16,11 @@ from loguru import logger
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 
-from fcr_curator.config import find_project_file, load_config
+from fcr_curator.config import load_config
 from fcr_curator.curation import curate, keep_doc_kinds, keep_reported_since
 from fcr_curator.download import download_documents
 from fcr_curator.http_client import create_session
-from fcr_curator.reference import REFERENCE_FILE, entity_resolver, load_reference_entities
+from fcr_curator.reference import REFERENCE_TABLE, entities_from_rows, entity_resolver
 from fcr_curator.schemas import SILVER_METADATA_SCHEMA, SILVER_SCHEMA
 from fcr_curator.tables import (
     add_missing_columns,
@@ -51,7 +51,9 @@ if not spark.catalog.tableExists(BRONZE_TABLE):
 ensure_table(spark, SILVER_TABLE, SILVER_SCHEMA, "silver", "Silver: curated FCRs, one per institution and year.")
 add_missing_columns(spark, SILVER_TABLE, SILVER_SCHEMA)  # Columns added to the schema after the table was made
 align_column_order(spark, SILVER_TABLE, SILVER_SCHEMA)  # ...which land at the end until moved into place
-resolve_entity = entity_resolver(load_reference_entities(find_project_file(REFERENCE_FILE)))
+resolve_entity = entity_resolver(
+    entities_from_rows(row.asDict() for row in spark.table(f"{cfg.full_schema_name}.{REFERENCE_TABLE}").collect())
+)
 
 # COMMAND ----------
 # 1-2. Curate all of bronze (de-duplication needs every row), filter, and merge into silver

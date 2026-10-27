@@ -1,0 +1,48 @@
+# dbt transformations of the FCR Curator, laid out like dbt Labs' jaffle-logistics example:
+#   staging       one model per landed source, lightly cleaned           (bronze)
+#   intermediate  joins across sources                                    (silver)
+#   context       the chunking chain: hash, chunk, attach metadata        (silver)
+#   context/ai    embeddings and the knowledge base the assistant serves  (gold)
+#   marts         dimensions for reporting, e.g. coverage by company       (gold)
+# Python lands the raw data first: search results, disclosures pages, PDFs, parsed documents.
+name: fcr_curator
+version: "0.1.0"
+profile: fcr_curator
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # The pipeline's wheel, which the Python models install; the job passes the deployed path
+  fcr_curator_wheel: ""
+  # Embeddings come from the course's Unity Gateway service through Python (fcr_curator.gateway),
+  # because SQL ai_query can't reach it; the package's SQL embed() is therefore not used
+  embedding_endpoint: course_ops.gateway.embed
+  embedding_model: course_ops.gateway.embed
+  ai_functions_enabled: false
+
+seeds:
+  fcr_curator:
+    +persist_docs: {relation: true, columns: true}
+
+models:
+  # The package's own audit and monitoring models aren't used
+  dbt_context_engineering:
+    +enabled: false
+  fcr_curator:
+    # Column descriptions become Unity Catalog comments, which Genie and agents read as context
+    +persist_docs: {relation: true, columns: true}
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    context:
+      +materialized: view
+      ai:
+        +materialized: incremental
+        +tblproperties: {quality: gold, delta.enableChangeDataFeed: "true"}
+    marts:
+      +materialized: view

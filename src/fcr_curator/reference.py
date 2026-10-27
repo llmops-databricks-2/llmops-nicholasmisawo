@@ -1,6 +1,7 @@
 """The reference list of insurers and reinsurers: who bronze searches for, and the names FCRs are given.
 
-The list is a CSV with a header row:
+The list is a dbt seed (dbt/seeds/bermuda_reinsurers.csv), loaded as the table ref_bermuda_reinsurers,
+which the pipeline reads. Its columns:
 
 - `name`: the insurer's name, as searched for and as shown on its FCRs and chunks (`registered_name`)
 - `assets_bn_usd`: total assets; insurers are searched largest first, so when a run's search budget runs
@@ -13,16 +14,18 @@ The list is a CSV with a header row:
 - `fcr_pages` (optional): full URLs of pages that link to the company's FCRs, separated by `;`. Bronze
   reads them directly (sources/pages.py), finding FCRs without spending a search.
 
-The file is a seed: swap in a fuller register (such as the BMA's) without changing code.
+Swap in a fuller register (such as the BMA's) by editing the seed; no code changes.
 """
 
 import csv
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from fcr_curator.curation import EntityResolver, institution_key, on_domain, same_institution
 
-REFERENCE_FILE = "reference/bermuda_reinsurers.csv"
+REFERENCE_FILE = "dbt/seeds/bermuda_reinsurers.csv"
+REFERENCE_TABLE = "ref_bermuda_reinsurers"  # The seed's table, in the project's schema
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,7 @@ def _split(value: str | None) -> tuple[str, ...]:
     return tuple(part.strip() for part in (value or "").split(";") if part.strip())
 
 
-def _parse(row: dict, line: int) -> ReferenceEntity:
+def _parse(row: Mapping, line: int) -> ReferenceEntity:
     name = (row.get("name") or "").strip()
     if not name:
         raise ValueError(f"Line {line}: no name")
@@ -63,14 +66,14 @@ def _parse(row: dict, line: int) -> ReferenceEntity:
         raise ValueError(f"Line {line} ({name}): assets_bn_usd must be a number") from error
 
 
-def load_reference_entities(path: str | Path) -> list[ReferenceEntity]:
-    """Return the insurers in the CSV at path, largest assets first.
+def entities_from_rows(rows: Iterable[Mapping]) -> list[ReferenceEntity]:
+    """Return the insurers in rows (from the seed table or its CSV), largest assets first.
 
-    Raises ValueError, naming the line, for a row with no name or no numeric assets, and for a name that
+    Raises ValueError, naming the row, for a row with no name or no numeric assets, and for a name that
     repeats another once case, punctuation and legal suffixes are ignored (it would be searched twice).
+    Rows are numbered as CSV lines are, so line 2 is the first company.
     """
-    with open(path, newline="", encoding="utf-8") as file:
-        entities = [_parse(row, line) for line, row in enumerate(csv.DictReader(file), start=2)]
+    entities = [_parse(row, line) for line, row in enumerate(rows, start=2)]
 
     seen: dict[str, str] = {}
     for entity in entities:
@@ -81,6 +84,12 @@ def load_reference_entities(path: str | Path) -> list[ReferenceEntity]:
             seen[key] = name
 
     return sorted(entities, key=lambda entity: entity.assets_bn_usd, reverse=True)
+
+
+def load_reference_entities(path: str | Path) -> list[ReferenceEntity]:
+    """Return the insurers in the seed CSV at path (see entities_from_rows)."""
+    with open(path, newline="", encoding="utf-8") as file:
+        return entities_from_rows(csv.DictReader(file))
 
 
 def entity_resolver(entities: list[ReferenceEntity]) -> EntityResolver:

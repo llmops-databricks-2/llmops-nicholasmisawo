@@ -19,9 +19,9 @@ from loguru import logger
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 
-from fcr_curator.config import find_project_file, load_config
+from fcr_curator.config import load_config
 from fcr_curator.http_client import create_session
-from fcr_curator.reference import REFERENCE_FILE, load_reference_entities
+from fcr_curator.reference import REFERENCE_TABLE, entities_from_rows
 from fcr_curator.schemas import BRONZE_SCHEMA, SEARCH_LOG_SCHEMA, SOURCE_SCHEMA
 from fcr_curator.search_plan import (
     SearchSettings,
@@ -44,9 +44,12 @@ dbutils.widgets.text("dry_run", "false")
 cfg = load_config("../../project_config.yml", env=dbutils.widgets.get("env"))
 DRY_RUN = dbutils.widgets.get("dry_run").strip().lower() == "true"
 
-# (Re)insurers searched for by name, largest assets first (reference/bermuda_reinsurers.csv), each under
+# (Re)insurers searched for by name, largest assets first (the dbt seed ref_bermuda_reinsurers), each under
 # its current and previous names; a name is skipped once silver holds its FCR for the latest year
-REFERENCE_ENTITIES = load_reference_entities(find_project_file(REFERENCE_FILE))
+REFERENCE_TABLE_NAME = f"{cfg.full_schema_name}.{REFERENCE_TABLE}"
+if not spark.catalog.tableExists(REFERENCE_TABLE_NAME):
+    raise RuntimeError(f"{REFERENCE_TABLE_NAME} not found; run the dbt_seed task first")
+REFERENCE_ENTITIES = entities_from_rows(row.asDict() for row in spark.table(REFERENCE_TABLE_NAME).collect())
 SETTINGS = SearchSettings(
     latest_year=date.today().year - 1,  # FCRs are published after the year ends
     institutions=tuple(name for entity in REFERENCE_ENTITIES for name in entity.names),
