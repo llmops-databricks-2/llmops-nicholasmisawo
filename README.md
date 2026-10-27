@@ -22,14 +22,18 @@ market. It should answer questions like:
 ## How it works
 
 ```text
-                 Python lands the raw data                                    dbt builds the rest
-reference list -> search + disclosures pages -> curate, download -> parse  |  chunk -> embed -> knowledge base
-  (dbt seed)      raw_fcr_search_results         raw_fcr_register    raw_fcr_parsed_documents   fcr_knowledge_base
-                                                                                                      |
-                                                                                    Lakebase (pgvector) copy
-                                                                                                      |
+   dbt                     Python                         dbt          Python           dbt
+reference list -> plan -> search + disclosures pages -> curate -> download PDFs -> parse -> chunk -> embed -> knowledge base
+  (seed)  fcr_search_plan  raw_fcr_search_hits            fcr_register  (volume)      fcr_parsed_documents        fcr_knowledge_base
+                                                                                                                |
+                                                                                              Lakebase (pgvector) copy
+                                                                                                                |
               question -> rewrite -> semantic + keyword search (filtered) -> rerank -> cited, token-budgeted context
 ```
+
+Python does only what dbt can't: calling SerpAPI, reading disclosures pages and downloading PDFs. It
+appends what it saw to tables dbt defines, never updating a row; dbt plans the searches and works out
+everything else.
 
 One weekly job runs everything up to Lakebase. Search runs on demand. Every FCR is named after the
 reference list where its company is on it, and every citation opens the PDF at the cited page. The design
@@ -65,9 +69,9 @@ Deploy and run:
 ```bash
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
-databricks bundle run fcr_pipeline -t dev --only search_fcrs --params dry_run=true            # plan and cost, no searches
+databricks bundle run fcr_pipeline -t dev --only dbt_search_plan,search_fcrs --params dry_run=true   # plan and cost, no searches
 databricks bundle run fcr_pipeline -t dev                                                     # the whole pipeline
-databricks bundle run fcr_pipeline -t dev --only curate_and_download_fcrs+                    # everything after search
+databricks bundle run fcr_pipeline -t dev --only dbt_register+                                # everything after search
 ```
 
 The job runs dbt itself. To run dbt from your machine, see [02 Layers and dbt](docs/02-layers-and-dbt.md#running-dbt).
@@ -75,18 +79,17 @@ The job runs dbt itself. To run dbt from your machine, see [02 Layers and dbt](d
 Search the knowledge base from your machine:
 
 ```bash
-env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_knowledge_base.py
+env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/02_retrieval/search_knowledge_base.py
 ```
 
 ## Project layout
 
 ```text
-src/fcr_curator/     the package: search planning, sources, curation, parsing, chunking, gateway, Lakebase, search
+src/fcr_curator/     the package: search planning, sources, curation, downloads, chunking, gateway, Lakebase, search
 notebooks/
-  01_ingestion/      search_fcrs (SerpAPI and pages), curate_and_download_fcrs
-  02_processing/     parse_fcr_documents (ai_parse_document)
-  03_retrieval/      sync to Lakebase, search walkthrough, UI search queries (search_examples.sql)
-dbt/                 dbt project (own environment): reference seed, staging, intermediate, context, marts
+  01_ingestion/      search_fcrs (SerpAPI and pages), download_fcrs
+  02_retrieval/      sync to Lakebase, search walkthrough, UI search queries (search_examples.sql)
+dbt/                 dbt project (own environment): reference seed, curation, parsing, chunking, embeddings, marts
 resources/           the bundle's job definition
 tests/               unit tests, one file per module
 docs/                design and findings

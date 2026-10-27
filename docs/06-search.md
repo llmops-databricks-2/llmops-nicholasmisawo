@@ -1,11 +1,11 @@
 # 06 Search
 
-One question goes through every retrieval technique in `notebooks/03_retrieval/search_knowledge_base.py`,
+One question goes through every retrieval technique in `notebooks/02_retrieval/search_knowledge_base.py`,
 so the effect of each shows. It searches the Lakebase copy of the dbt knowledge base
 (`nicholasmisawo.fcr_knowledge_base_lakebase_<target>`) over Postgres, so run it from your machine:
 
 ```bash
-env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_knowledge_base.py
+env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/02_retrieval/search_knowledge_base.py
 ```
 
 | Step | Module | What it does |
@@ -43,7 +43,7 @@ Wilton Re's 2024 cover was about 245%.
 
 ## Testing from the UI
 
-`notebooks/03_retrieval/search_examples.sql` has the same searches as SQL, with no Python needed. Each
+`notebooks/02_retrieval/search_examples.sql` has the same searches as SQL, with no Python needed. Each
 returns the company, reporting year, an excerpt and the `citation_url` that opens the cited page.
 
 | Query | Editor | Expected top result |

@@ -6,16 +6,18 @@ pipeline finds them with Google search (through SerpAPI), curates the results, a
 ## The job
 
 One job, `fcr_pipeline-<target>`, runs the stages in order; each starts only when the one before succeeds,
-and only one run goes at a time (a second start queues). Python lands the raw data; dbt builds the rest.
+and only one run goes at a time (a second start queues). Python does only what dbt can't: calling
+SerpAPI, reading disclosures pages and downloading PDFs. dbt does the rest: the search plan, curation
+and parsing included.
 
 | Task | Runs | Writes |
 |---|---|---|
-| `dbt_seed` | dbt | `ref_bermuda_entities` (the reference list, tested) |
-| `search_fcrs` | `01_ingestion/search_fcrs.py` | `raw_fcr_search_results`, `raw_fcr_search_log` |
-| `curate_and_download_fcrs` | `01_ingestion/curate_and_download_fcrs.py` | `raw_fcr_register`; PDFs in the `fcr_documents` volume |
-| `parse_fcr_documents` | `02_processing/parse_fcr_documents.py` | `raw_fcr_parsed_documents` |
-| `dbt_context` | dbt | staging, intermediate and context models, `fcr_knowledge_base`, `dim_fcr_companies` ([05 Layers](02-layers-and-dbt.md)) |
-| `sync_knowledge_base_to_lakebase` | `03_retrieval/sync_knowledge_base_to_lakebase.py` | Lakebase synced table `fcr_knowledge_base_lakebase_<target>` |
+| `dbt_search_plan` | dbt (`fcr_search_plan`, a Python model running `search_plan.py`) | `ref_bermuda_entities` (the reference list, tested), `fcr_search_plan` |
+| `search_fcrs` | `01_ingestion/search_fcrs.py` | Appends to `raw_fcr_search_hits`, `raw_fcr_searches`, `raw_fcr_page_reads` |
+| `dbt_register` | dbt (`int_fcr_search_results`, then `int_fcr_register`, a Python model running `curation.py`) | `fcr_register` |
+| `download_fcrs` | `01_ingestion/download_fcrs.py` | PDFs in the `fcr_documents` volume; appends to `raw_fcr_download_attempts` |
+| `dbt_context` | dbt | `fcr_parsed_documents` (`ai_parse_document`), section chunks, embeddings, `fcr_knowledge_base`, `dim_fcr_companies` ([02 Layers](02-layers-and-dbt.md)) |
+| `sync_knowledge_base_to_lakebase` | `02_retrieval/sync_knowledge_base_to_lakebase.py` | Lakebase synced table `fcr_knowledge_base_lakebase_<target>` |
 
 It runs weekly, Mondays at 06:00 Bermuda time. The schedule is paused in `dev` and `acc` and active in
 `prd` (`schedule_pause_status` in `databricks.yml`). Parameters: `env` (defaults to the target) and
@@ -23,8 +25,9 @@ It runs weekly, Mondays at 06:00 Bermuda time. The schedule is paused in `dev` a
 
 ## Search on a budget
 
-The SerpAPI plan allows 1,000 searches a month, and an empty results page still counts as one. The search
-task spends searches only where a new FCR is likely (`search_plan.py`):
+The SerpAPI plan allows 1,000 searches a month, and an empty results page still counts as one. So each
+run starts with dbt planning searches only where a new FCR is likely (`fcr_search_plan`, running
+`search_plan.py`), and the search task asks them in this order until its budget is spent:
 
 | Priority | Query | Asked when | Pages |
 |---|---|---|---|
@@ -41,12 +44,12 @@ can't mark every "… Group" (re)insurer as already covered. Several seed names 
 Watford, Third Point Re, Ironshore and Argo were acquired or merged; Everest Re Group is now Everest
 Group), and their searches show how stale names fare.
 
-- **No repeats**: every search is logged in `raw_fcr_search_log`, and a query waits 28 days before it runs again, or 90 if it found nothing FCR-like.
+- **No repeats**: every search is recorded in `raw_fcr_searches`, and a query waits 28 days before it runs again, or 90 if it found nothing FCR-like.
 - **No wasted pages**: a second page is asked only when the first was full and held something FCR-like.
 - **Targeted results**: every search sends `gl=bm` (rank as if from Bermuda), `lr=lang_en` and `nfpr=1` (no auto-correction). `cr=countryBM` and date filters are left out: most FCRs are hosted outside Bermuda, and Google's PDF dates are unreliable.
 - **Hard caps**: a free account check comes first, then at most `min(150, searches left − 100)` per run, or about 650 a month at most.
-- **Dry run**: `--params dry_run=true` prints the plan and its cost without searching.
-- **Nothing lost on failure**: if SerpAPI fails partway, what was already found and logged is kept, then the task fails.
+- **Dry run**: `--only dbt_search_plan,search_fcrs --params dry_run=true` builds the plan and prints it with its cost, without searching.
+- **Nothing lost on failure**: if SerpAPI fails partway, what the run already paid for is appended, then the task fails.
 
 The key comes from the Databricks secret `fcr_curator` / `serpapi_api_key`:
 
@@ -78,7 +81,7 @@ so the same PDF found by a search and on a page isn't counted twice.
 
 ## Curation (`curation.py`)
 
-The curation task re-curates all the search results each run:
+dbt's `int_fcr_register` model re-curates all the search results each run:
 
 - **PDFs only**: a `.pdf` URL, or an extensionless one that a `filetype:pdf` query found. Each download is checked for a PDF header; a login or landing page is removed.
 - **Excluded sites**: `bma.bm` and `.gov` (with subdomains), in curation and as `-site:` in queries.
@@ -91,20 +94,33 @@ The curation task re-curates all the search results each run:
 
 ## Tables and incremental runs
 
-The tables Python lands (`src/fcr_curator/tables.py`), which dbt reads as sources:
+What Python lands, append-only (`src/fcr_curator/landing.py`), into tables dbt defines and creates (`dbt/models/staging/_sources.yml`):
 
-| Table | Holds |
+| Landed | One row per |
 |---|---|
-| `raw_fcr_search_results` | Every FCR PDF found by search or on a disclosures page, plus `first_seen_at` and `is_listed` |
-| `raw_fcr_search_log` | One row per search made (append-only) |
-| `raw_fcr_register` | Curated FCRs, one per company and year, plus `processed` and `volume_path` once downloaded |
-| `raw_fcr_parsed_documents` | `ai_parse_document` output per FCR, parsed once |
+| `raw_fcr_search_hits` | FCR PDF a run found, by search or on a disclosures page, as the source returned it |
+| `raw_fcr_searches` | Billed SerpAPI search (results page) |
+| `raw_fcr_page_reads` | Disclosures page that loaded |
+| `raw_fcr_download_attempts` | Attempt to fetch a PDF: downloaded, failed or rejected (not a PDF) |
+| The `fcr_documents` volume | Downloaded FCR, at `<source>/<document_id>.pdf` |
 
-Every table is updated with `MERGE`, never overwritten, so re-runs are safe:
+Every row carries `landed_at`, one value per run, which orders the runs.
 
-- **Search results**: a row is updated only when its content changes or a new query finds it; a new rank alone doesn't count, since Google reorders results. A row is delisted only when every query that ever found it was asked again and none returned it.
-- **The register** never touches `processed` or `volume_path` when re-curating, and drops rows that no longer survive curation (their files stay in the volume).
-- **Parsing** handles only new downloads, and deletes the parses of FCRs the register dropped.
+What dbt builds from them for this stage:
+
+| Model | Holds |
+|---|---|
+| `fcr_search_plan` | The searches due this run, most promising first |
+| `int_fcr_search_results` | Every FCR PDF found: the latest copy, every query that found it, `first_seen_at`, `is_listed` |
+| `fcr_register` | Curated FCRs, one per company, year and kind, with `volume_path`, `downloaded_at` (empty until downloaded), `download_attempts` and `last_download_outcome` |
+| `fcr_parsed_documents` | `ai_parse_document` output per downloaded FCR, parsed once |
+
+Re-runs are safe, and each costs only what's new:
+
+- **Search** only appends. dbt takes each URL as the latest run found it, with every query that ever found it. A URL is delisted once a later run asked again every query that found it (a disclosures page that loaded counts as asked) and none returned it; finding it again lists it again. dbt unit tests pin this rule down (`dbt/models/intermediate/_intermediate.yml`).
+- **The register** is rebuilt from all the search results every run, so an FCR that no longer survives curation leaves it (its file stays in the volume).
+- **Downloads** fetch only files missing from the volume; the volume is the record of what's downloaded, and dbt reads it. Each attempt is appended, so `fcr_register` shows an FCR that keeps failing.
+- **Parsing** is incremental: only FCRs not yet parsed are, and `full_refresh: false` stops even `dbt build --full-refresh` from parsing every PDF again. A parse stays when its FCR leaves the register, so an FCR that comes back isn't parsed twice.
 
 ## Findings
 

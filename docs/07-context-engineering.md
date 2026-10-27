@@ -4,7 +4,7 @@ Every strategy that controls what reaches the model, in the order a document mee
 
 | Strategy | Where | Why |
 |---|---|---|
-| Curated sources | `search_plan.py`, `curation.py` | Only FCRs reach the index: `.gov`, `bma.bm` and non-FCR results are dropped, and one copy is kept per (re)insurer and year |
+| Curated sources | `search_plan.py`, `curation.py` (run by dbt's `fcr_search_plan`, `int_fcr_register`) | Only FCRs reach the index: `.gov`, `bma.bm` and non-FCR results are dropped, and one copy is kept per (re)insurer and year |
 | Noise removal | `chunking.py` | Page headers, footers, page numbers and signatures never become chunks |
 | Contextual chunk headers | `chunking.py` | Every section chunk starts with its section heading, so a bare table still says what it is |
 | Size control | `chunking.py` | Chunks of at most about 2,000 characters, tables split by rows with the header row repeated, all well inside the embedding model's 8,192-token window |

@@ -8,9 +8,9 @@ schema makes it answerable. The dbt project is laid out like dbt Labs'
 
 | Layer | Meaning | Where | Tables |
 |---|---|---|---|
-| **Raw** | Lands untouched | Python | PDFs in the `fcr_documents` volume; `raw_fcr_search_results`, `raw_fcr_search_log`, `raw_fcr_register` |
-| **Bronze** | Machine-readable | Python, then dbt `staging/` | `raw_fcr_parsed_documents` (parser output) → `stg_fcr_*` views |
-| **Silver** | Retrievable | dbt `intermediate/`, `context/` | `int_fcr_documents` → `fcr_parsed_hashed` → `chunk_fcr_sections` → `fcr_chunks_meta` |
+| **Raw** | Lands untouched | Python, appending to tables dbt defines | `raw_fcr_search_hits`, `raw_fcr_searches`, `raw_fcr_page_reads`, `raw_fcr_download_attempts`; PDFs in the `fcr_documents` volume |
+| **Bronze** | Machine-readable | dbt `staging/`, `intermediate/` | `stg_fcr_*` views → `int_fcr_search_results` → `int_fcr_register` (curation) → **`fcr_register`** → `int_fcr_documents` |
+| **Silver** | Retrievable | dbt `context/` | `fcr_parsed_documents` (parser output) → `fcr_parsed_hashed` → `chunk_fcr_sections` → `fcr_chunks_meta` |
 | **Gold** | Answerable | dbt `context/ai/`, `marts/` | `fcr_chunk_embeddings` → **`fcr_knowledge_base`** (copied to Lakebase as `fcr_knowledge_base_lakebase_<target>`); `dim_fcr_companies` |
 
 Reference data: **`ref_bermuda_entities`**, the dbt seed of the reference list (`dbt/seeds/`).
@@ -18,21 +18,51 @@ Reference data: **`ref_bermuda_entities`**, the dbt seed of the reference list (
 **Naming.** Raw, bronze, silver and gold are layers of meaning, not table prefixes. Tables Python lands
 start with `raw_` (dbt reads them as sources; the names live in `src/fcr_curator/tables.py`); dbt names
 its models the jaffle-logistics way (`stg_`, `int_`, chain names, `dim_`); and job tasks and notebooks are
-named for what they do (`search_fcrs`, `curate_and_download_fcrs`, `parse_fcr_documents`).
+named for what they do (`dbt_search_plan`, `search_fcrs`, `dbt_register`, `download_fcrs`, `dbt_context`).
+
+**What stays in Python, and why.** dbt rebuilds tables from data; it isn't meant to call the outside
+world. Two steps do, so they're notebooks:
+
+- **Search** spends SerpAPI searches from a 1,000-a-month budget and reads a secret. A retried model
+  or a `--full-refresh` could spend searches again or wipe history that can't be rebuilt. dbt plans
+  the searches (`fcr_search_plan`); the notebook only checks the budget, asks the plan's queries in
+  order until it's spent, and reads the disclosures pages.
+- **Download** writes PDFs to a volume, not rows to a table.
+
+Both only append what they saw (`landing.py`): every PDF found, search made, page read and download
+attempted, each stamped with the run (`landed_at`). They never update a row, so the raw tables are a
+complete history, and every rule about the data is dbt: the search plan, the current search results
+and delisting, curation, parsing and everything after.
+
+**dbt owns the landed tables too.** Their columns are declared once, in `models/staging/_sources.yml`.
+Before every run dbt creates any that are missing (`macros/landed_tables.sql`), so the plan can read
+them on a target's first run, before a search has appended anything. The Python tasks append in each
+table's own types and fail on a row whose columns don't match, and the unit tests check every source's
+rows against the same file.
 
 ## The dbt models
 
 ```text
 dbt/models/
-  staging/       stg_fcr_documents, stg_fcr_parsed_documents, stg_fcr_entities       (SQL views)
-  intermediate/  int_fcr_documents: each FCR with its company and reference details    (SQL view)
-  context/       fcr_parsed_hashed       content_hash of each parse (package macro)    (SQL)
+  staging/       stg_fcr_search_hits, stg_fcr_searches, stg_fcr_page_reads,
+                 stg_fcr_download_attempts   the landed facts, with the run that landed each  (SQL views)
+                 stg_fcr_volume_files    the PDFs in the volume, read by path           (SQL view)
+                 stg_fcr_entities        the reference list, with arrays                (SQL view)
+  intermediate/  int_fcr_search_results  every PDF found: latest copy, queries, delisting (SQL view)
+                 int_fcr_register        curation, fcr_curator.curation                 (Python)
+                 int_fcr_documents       each downloaded FCR with its company            (SQL view)
+  context/       fcr_parsed_documents    ai_parse_document, each PDF once               (SQL, incremental)
+                 fcr_parsed_hashed       content_hash of each parse (package macro)    (SQL)
                  chunk_fcr_sections      our section chunker, fcr_curator.chunking     (Python)
                  fcr_chunks_meta         each chunk with its FCR's current metadata    (SQL)
     ai/          fcr_chunk_embeddings    course_ops.gateway.embed, through gateway.py  (Python)
                  fcr_chunks_embedded     each chunk with the vector for its text       (SQL)
                  fcr_knowledge_base      the package's knowledge_base serving shape    (SQL)
-  marts/         dim_fcr_companies       FCR coverage by company and reporting year    (SQL view)
+  marts/         fcr_search_plan         the searches due this run, fcr_curator.search_plan (Python)
+                 fcr_register            the register the Python tasks read             (SQL view)
+                 dim_fcr_companies       FCR coverage by company and reporting year    (SQL view)
+macros/          fcr_volume.sql          the volume's name, path and file listing
+                 landed_tables.sql       creates the landed tables from _sources.yml
 ```
 
 ## Where the dbt_context_engineering package is used, and where it isn't
@@ -45,28 +75,30 @@ dbt/models/
 | `embed` | No: **a Python model on `course_ops.gateway.embed`** | Its Databricks version is SQL `ai_query`, which can't reach a model service the workspace created |
 | `attach_metadata` | No: plain SQL join (`fcr_chunks_meta`) | Its output keeps only the package's chunk columns, which would drop `page_id`, needed for citations |
 
-## Each text is embedded once
+## Each PDF is parsed once, each text embedded once
 
-`fcr_chunk_embeddings` is incremental: only chunks with no vector yet for their id and content hash go to
-the gateway. A run over unchanged FCRs makes no embedding calls.
+`fcr_parsed_documents` is incremental and has `full_refresh: false`: a run parses only FCRs not parsed
+yet, and even `dbt build --full-refresh` leaves the table alone, so no PDF is ever paid for twice.
+
+`fcr_chunk_embeddings` is incremental too: only chunks with no vector yet for their id and content hash
+go to the gateway. A run over unchanged FCRs makes no embedding calls.
 
 ## Running dbt
 
-In the job, `dbt_seed` runs first and `dbt_context` after processing, both on the SQL warehouse; the
-Python models run on serverless with the deployed `fcr_curator` wheel installed (passed as the
-`fcr_curator_wheel` var). Locally, from `dbt/` (signs in through the browser):
+In the job, `dbt_search_plan` runs first, `dbt_register` after search and `dbt_context` after
+downloads, all on the SQL warehouse; the Python models run on serverless with the deployed
+`fcr_curator` wheel installed (passed as the `fcr_curator_wheel` var). Locally, from `dbt/` (signs in
+through the browser):
 
 ```bash
 uv sync
 uv run dbt deps
-uv run dbt build --select bermuda_entities
-uv run dbt build --select +fcr_knowledge_base dim_fcr_companies --vars '{fcr_curator_wheel: <workspace path of the wheel>}'
+uv run dbt build --select +fcr_search_plan --vars '{fcr_curator_wheel: <workspace path of the wheel>}'
+uv run dbt build --select +fcr_register --vars '{fcr_curator_wheel: <workspace path of the wheel>}'
+uv run dbt build --select int_fcr_documents+ --vars '{fcr_curator_wheel: <workspace path of the wheel>}'
 ```
 
-dbt-core reports `CustomKeyInConfigDeprecation` for `environment_key`, `environment_dependencies` and
-`embedding_endpoint` on the Python models. The first two are dbt-databricks settings, read from that
-place; the third has to be a plain config key, because a Python model sees `meta` as empty. They stay.
-
-## Next
-
-Parsing (`ai_parse_document`) as a dbt model, so dbt reads the volume directly.
+dbt-core reports `CustomKeyInConfigDeprecation` for `environment_key`, `environment_dependencies`,
+`embedding_endpoint` and `volume_root` on the Python models. The first two are dbt-databricks settings,
+read from that place; the others have to be plain config keys, because a Python model sees `meta` as
+empty. They stay.
