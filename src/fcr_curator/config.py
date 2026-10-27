@@ -104,11 +104,6 @@ class ProjectConfig(BaseModel):
         """Get fully qualified schema name."""
         return f"{self.catalog}.{self.db_schema}"
 
-    @property
-    def full_volume_path(self) -> str:
-        """Get fully qualified volume path."""
-        return f"{self.catalog}.{self.schema}.{self.volume}"
-
 
 def find_project_file(relative_path: str) -> Path:
     """Return a file at the repository root, looking in the current folder and its parents.

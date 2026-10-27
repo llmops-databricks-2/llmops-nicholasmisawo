@@ -12,19 +12,14 @@ dependencies = [
     "databricks-sdk==0.118.0",
     "pydantic==2.10.6",
     "loguru==0.7.3",
-    "python-dotenv==1.2.1",
     "databricks-vectorsearch==0.63",
     "openai==2.14.0",
     "databricks-mcp==0.4.0",
-    "backoff==2.2.1",
     "mlflow==3.16.1",
-    "nest-asyncio==1.6.0",
-    "arxiv==2.3.1",
     "databricks-agents==1.12.0",
     "psycopg==3.3.2",
-    "psycopg-pool==3.3.0",
     "psycopg[binary]==3.3.2",
-    "requests>=2.32,<3"
+    "requests>=2.32,<3",
 ]
 
 [project.optional-dependencies]
