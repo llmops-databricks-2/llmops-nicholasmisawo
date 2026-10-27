@@ -30,7 +30,9 @@ YEAR_BESIDE_NAME_PATTERN = re.compile(
     r"(?:financial condition report|\bs?fcr)\D{0,30}?\b(20\d{2})\b|\b(20\d{2})\b\D{0,30}?(?:financial condition report|fcr\b)"
 )
 # Leftovers around an institution's name once the report's name is cut out of a title
-TITLE_LEFTOVERS = re.compile(r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+")
+TITLE_LEFTOVERS = re.compile(
+    r"(?:\bpdf\b|\bfor the year ended\b.*|\b20\d{2}\b|[\s\-–—|:,()]+)+$|^[\s\-–—|:,]+", re.IGNORECASE
+)
 
 # Dropped from an institution name before matching, so "Wilton Re Ltd." still finds wiltonre.bm
 LEGAL_SUFFIXES = re.compile(r"\b(?:ltd|limited|inc|plc|llc|sa|se|ag|group)\b\.?", re.IGNORECASE)
@@ -140,6 +142,17 @@ def institution(title: str, site_name: str | None = None) -> str | None:
     match = FCR_NAME_PATTERN.search(normalized)
     name = TITLE_LEFTOVERS.sub("", normalized[: match.start()]) if match else ""
     return name or site_name or None
+
+
+def title_subject(title: str | None) -> str | None:
+    """Return the title after the report's name, where some insurers put their own name.
+
+    "FINANCIAL CONDITION REPORT - Wilton Re Bermuda" -> "Wilton Re Bermuda". Often it's only a date or
+    "(SFCR", which names no insurer, so it's only ever matched against names, never shown.
+    """
+    normalized = normalize_title(title or "")
+    match = FCR_NAME_PATTERN.search(normalized)
+    return (TITLE_LEFTOVERS.sub("", normalized[match.end() :]) or None) if match else None
 
 
 # --- Curating ---------------------------------------------------------------------------------

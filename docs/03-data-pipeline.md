@@ -110,8 +110,9 @@ Global Reinsurance, Ltd. (Group)"); an FCR either could have filed goes to the i
 | Register under the entity list | 55 FCRs from 32 listed insurers kept, of the 90 curated before; the rest were companies outside the 194 (UK Solvency II reports among them) |
 | First plan | 170 queries due: 1 `site:` query and 169 name queries; a run's 150-search budget leaves the last 20 for the next run |
 | First search of the list | 150 searches, 1,305 results, 517 FCR-like; 107 of the searches found something FCR-like |
-| After it | **80 FCRs from 41 of the 194 insurers**, one per insurer and year, 77 downloaded; 13,546 chunks from 40 insurers in the knowledge base and Lakebase |
-| Coverage by class | Groups 17 of 33 · Class 4 10 of 46 · Long Term E 11 of 83 · Class 3B 3 of 32 |
+| After it | **86 FCRs from 45 of the 194 insurers**, one per insurer and year, 83 downloaded; 14,192 chunks from 44 insurers in the knowledge base and Lakebase, each with its licence class |
+| Coverage by class | Groups 19 of 33 · Class 4 10 of 46 · Long Term E 13 of 83 · Class 3B 3 of 32 |
+| Names after the report's | Some titles name the insurer last ("FINANCIAL CONDITION REPORT - Wilton Re Bermuda"), so that part of the title is matched too; it brought back Wilton Reinsurance Bermuda's FCRs and gave Athora Life Re its own, instead of Athora Group's |
 
 ## Disclosures pages (`sources/pages.py`)
 

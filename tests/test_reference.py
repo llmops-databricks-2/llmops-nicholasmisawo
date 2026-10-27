@@ -133,6 +133,17 @@ def test_a_foreign_subsidiarys_report_elsewhere_isnt_taken_for_its_groups() -> N
     assert resolve(domain="centralbank.ie", institution="Antares Reinsurance Company Europe SE") is None
 
 
+def test_an_fcr_titled_with_the_insurer_after_the_report_name_is_matched() -> None:
+    """A title like "FINANCIAL CONDITION REPORT - Wilton Re International" names its insurer last."""
+    document = {
+        "domain": "cdn.example.com",
+        "institution": "cdn.example.com",
+        "title": "FINANCIAL CONDITION REPORT - Wilton Re International",
+    }
+
+    assert resolve(**document) == WILTON.name
+
+
 def test_an_fcr_naming_no_listed_insurer_gets_no_name() -> None:
     """Curation leaves out FCRs of insurers not on the list."""
     assert resolve(domain="steamshipmutual.com", institution="Steamship Mutual") is None

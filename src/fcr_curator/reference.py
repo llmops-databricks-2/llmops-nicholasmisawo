@@ -18,7 +18,14 @@ bma_licence_classes.csv), with what fcr_entity_details.csv adds. Each row has:
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from fcr_curator.curation import MIN_NAME_KEY_CHARS, EntityResolver, institution_key, on_domain, same_institution
+from fcr_curator.curation import (
+    MIN_NAME_KEY_CHARS,
+    EntityResolver,
+    institution_key,
+    on_domain,
+    same_institution,
+    title_subject,
+)
 
 REFERENCE_TABLE = "stg_fcr_entities"  # The entity list's view, in the project's schema
 
@@ -129,13 +136,14 @@ def entity_resolver(entities: list[ReferenceEntity]) -> EntityResolver:
 
     A document on a group's domain is one of that group's companies: the one its institution or title
     names, or the only one if the group has just one. Elsewhere it's the listed insurer its institution
-    names, in full or shortened ("Everest Re"); a longer, more specific name is another company, such as
-    a group's foreign subsidiary. A document naming no listed insurer gets None, which leaves it out of
+    (or the name after the report's in its title) names, in full or shortened ("Everest Re"); a longer,
+    more specific name is another company, such as a group's foreign subsidiary. A document naming no listed insurer gets None, which leaves it out of
     the register, and so does one on a shared domain that doesn't say which sister company it is.
     """
 
     def resolve(document: dict) -> str | None:
-        document_names = [name for name in (document.get("institution"), document.get("title")) if name]
+        subject = title_subject(document.get("title"))
+        document_names = [name for name in (document.get("institution"), subject, document.get("title")) if name]
         group_on_domain = [
             entity for entity in entities if any(on_domain(document.get("domain"), domain) for domain in entity.domains)
         ]
@@ -144,7 +152,7 @@ def entity_resolver(entities: list[ReferenceEntity]) -> EntityResolver:
                 return match
             if len(group_on_domain) == 1:
                 return group_on_domain[0].name
-        institution = [document["institution"]] if document.get("institution") else []
-        return _best_name_match(entities, institution, on_its_domain=False)
+        named = [name for name in (document.get("institution"), subject) if name]
+        return _best_name_match(entities, named, on_its_domain=False)
 
     return resolve

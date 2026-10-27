@@ -17,6 +17,7 @@ from fcr_curator.curation import (
     on_domain,
     reporting_year,
     same_institution,
+    title_subject,
 )
 
 TODAY = date(2026, 10, 25)
@@ -212,6 +213,20 @@ def test_curate_leaves_the_bronze_rows_it_was_given_unchanged() -> None:
     curate(rows, today=TODAY)
 
     assert rows == before
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("FINANCIAL CONDITION REPORT - Wilton Re Bermuda", "Wilton Re Bermuda"),
+        ("Financial Condition Report For the year ended December 31, 2025", None),  # Only a date follows
+        ("Example Re Ltd. - Financial Condition Report 2024", None),
+        ("Annual Report 2024", None),  # No report name at all
+    ],
+)
+def test_title_subject_is_what_follows_the_report_name(title: str, expected: str | None) -> None:
+    """Some insurers name themselves after the report's name; a bare date or year is nothing."""
+    assert title_subject(title) == expected
 
 
 def test_institution_key_ignores_case_punctuation_and_legal_suffixes() -> None:
