@@ -7,7 +7,7 @@ spans them. Each stage page explains how it works, then records the findings fro
 | Page | Covers |
 |---|---|
 | [01 Environment](01-environment.md) | Provisioned resources, model services, environments and CI |
-| [02 Layers and dbt](02-layers-and-dbt.md) | The layers, the dbt models (laid out like jaffle-logistics) and where the context engineering package is used |
+| [02 Layers and dbt](02-layers-and-dbt.md) | The layers, the dbt models and where the dbt context engineering package is used |
 | [03 Data pipeline](03-data-pipeline.md) | The job, finding FCRs on a search budget and on disclosures pages, curation, the raw tables |
 | [04 Chunking](04-chunking.md) | Parsing, the two chunking strategies compared, chunk boundaries, the embedding window |
 | [05 Lakebase](05-lakebase.md) | Embeddings and the Lakebase copy of the knowledge base |

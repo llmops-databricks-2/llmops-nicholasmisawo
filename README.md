@@ -1,6 +1,6 @@
 # Bermuda Financial Condition Report Curator
 
-**Databricks LLMOps | Bermuda Insurer and Reinsurer Financial Condition Intelligence**
+**Databricks LLMOps | Bermuda Insurer and Reinsurer Financial Condition Reports Assistant**
 
 An assistant for the Financial Condition Reports (FCRs) Bermuda commercial insurers and reinsurers
 publish. It finds each company's report, and answers questions grounded in the figures the reports
@@ -15,7 +15,7 @@ its own website in its own layout, so comparing companies or years means hunting
 reports. The assistant is for analysts, reinsurance buyers, and risk and compliance teams who follow the
 market. It should answer questions like:
 
-- How did Wilton Re's solvency ratio compare with its capital requirement in 2024?
+- How did Example Re's solvency ratio compare with its capital requirement in 2024?
 - Which insurers and reinsurers reported the largest change in available statutory capital last year?
 - How do Class 4 (re)insurers describe their exposure to catastrophe risk?
 

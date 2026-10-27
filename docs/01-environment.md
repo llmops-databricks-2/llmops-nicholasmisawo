@@ -18,9 +18,13 @@
 | `course_ops.gateway.chat` | GPT-OSS-120B | Query rewriting, reranking |
 | `course_ops.gateway.embed` | GTE Large (`gte-large-en-v1.5`, 1,024 dimensions, 8,192-token window) | Chunk and question embeddings |
 
-Both are called through the gateway's OpenAI-compatible API at `<workspace>/ai-gateway/mlflow/v1`
-(`gateway.py`). SQL `ai_query` can't reach them; `system.ai.gte-large-en` is the same embedding model
-and is reachable from SQL.
+Both are called from Python through the gateway's OpenAI-compatible API at
+`<workspace>/ai-gateway/mlflow/v1` (`gateway.py`): the chunk embeddings by dbt's Python model
+`fcr_chunk_embeddings`, which runs on serverless with the project's wheel, and the question embeddings
+and chat by the search code. SQL `ai_query` reaches only Databricks' own `system.ai` models, not these
+course services, which is why embedding is a dbt Python model rather than the package's SQL `embed()`.
+`system.ai.gte-large-en` is the same embedding model (identical vectors), so SQL can embed a question
+to compare with the stored ones (`notebooks/02_retrieval/search_examples.sql`).
 
 ## Environments and CI
 
