@@ -1,15 +1,15 @@
 # FCR Pipeline
 #
-# One job running the medallion stages in order, each task starting only
-# once the one before it succeeds:
+# One job running the stages in order, each task starting only once the one
+# before it succeeds. Python lands the raw data; dbt builds everything after it:
 #
-#   dbt_seed               load and test the reference list (dbt seed ref_bermuda_reinsurers)
-#   bronze_fcr_documents   search for FCRs with SerpAPI and on disclosures pages; upsert bronze
-#   silver_fcr_documents   curate bronze into silver, download new PDFs
-#   process_fcr_documents  parse, chunk and embed newly downloaded FCRs
-#   dbt_context            dbt: staging -> intermediate -> context (section chunks, embeddings)
-#                          -> fcr_knowledge_base, plus the dim_fcr_companies coverage mart
-#   sync_fcr_chunks_to_lakebase  create or refresh the Lakebase synced table of the chunks
+#   dbt_seed                  load and test the reference list (ref_bermuda_entities)
+#   search_fcrs               SerpAPI and disclosures pages -> raw_fcr_search_results
+#   curate_and_download_fcrs  curate into raw_fcr_register, download new PDFs
+#   parse_fcr_documents       ai_parse_document -> raw_fcr_parsed_documents
+#   dbt_context               staging -> intermediate -> context (section chunks, embeddings)
+#                             -> fcr_knowledge_base, plus the dim_fcr_companies coverage mart
+#   sync_knowledge_base_to_lakebase  create or refresh the Lakebase copy of fcr_knowledge_base
 #
 # Every stage is incremental, so re-runs only pick up new or changed FCRs.
 # A single stage can still be run on its own from the job page by choosing
@@ -36,9 +36,9 @@ resources:
         timezone_id: "Atlantic/Bermuda"
         pause_status: ${var.schedule_pause_status}
       budget_policy_id: ${var.usage_policy_id}
-      # Passed to every task's notebook as a widget. dry_run=true makes bronze print its search plan
+      # Passed to every task's notebook as a widget. dry_run=true makes search_fcrs print its search plan
       # and budget without spending any SerpAPI searches, e.g.
-      #   databricks bundle run fcr_pipeline -t dev --only bronze_fcr_documents --params dry_run=true
+      #   databricks bundle run fcr_pipeline -t dev --only search_fcrs --params dry_run=true
       parameters:
         - name: env
           default: ${bundle.target}
@@ -67,35 +67,35 @@ resources:
             project_directory: ../dbt
             commands:
               - dbt deps
-              - dbt build --select bermuda_reinsurers
+              - dbt build --select bermuda_entities
             warehouse_id: ${var.warehouse_id}
             catalog: ${var.catalog}
             schema: ${var.schema}
 
-        - task_key: bronze_fcr_documents
+        - task_key: search_fcrs
           depends_on:
             - task_key: dbt_seed
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/01_ingestion/bronze_fcr_documents.py
+            notebook_path: ../notebooks/01_ingestion/search_fcrs.py
 
-        - task_key: silver_fcr_documents
+        - task_key: curate_and_download_fcrs
           depends_on:
-            - task_key: bronze_fcr_documents
+            - task_key: search_fcrs
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/01_ingestion/silver_fcr_documents.py
+            notebook_path: ../notebooks/01_ingestion/curate_and_download_fcrs.py
 
-        - task_key: process_fcr_documents
+        - task_key: parse_fcr_documents
           depends_on:
-            - task_key: silver_fcr_documents
+            - task_key: curate_and_download_fcrs
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/02_processing/process_fcr_documents.py
+            notebook_path: ../notebooks/02_processing/parse_fcr_documents.py
 
         - task_key: dbt_context
           depends_on:
-            - task_key: process_fcr_documents
+            - task_key: parse_fcr_documents
           environment_key: dbt
           dbt_task:
             source: WORKSPACE
@@ -110,9 +110,9 @@ resources:
             catalog: ${var.catalog}
             schema: ${var.schema}
 
-        - task_key: sync_fcr_chunks_to_lakebase
+        - task_key: sync_knowledge_base_to_lakebase
           depends_on:
             - task_key: dbt_context
           environment_key: default
           notebook_task:
-            notebook_path: ../notebooks/03_retrieval/sync_fcr_chunks_to_lakebase.py
+            notebook_path: ../notebooks/03_retrieval/sync_knowledge_base_to_lakebase.py

@@ -8,5 +8,5 @@ select
     reporting_year,
     file_url,
     volume_path
-from {{ source('landed', 'silver_fcr_documents') }}
+from {{ source('landed', 'raw_fcr_register') }}
 where volume_path is not null

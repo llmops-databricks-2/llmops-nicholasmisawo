@@ -2,11 +2,9 @@
 
 from fcr_curator.curation import curate_document
 from fcr_curator.schemas import (
-    BRONZE_SCHEMA,
-    CHUNKS_SCHEMA,
-    EMBEDDED_CHUNKS_SCHEMA,
-    SILVER_METADATA_SCHEMA,
-    SILVER_SCHEMA,
+    REGISTER_METADATA_SCHEMA,
+    REGISTER_SCHEMA,
+    SEARCH_RESULTS_SCHEMA,
     SOURCE_SCHEMA,
 )
 from fcr_curator.sources.serpapi import merge_rows, parse_results
@@ -26,7 +24,7 @@ def test_source_schema_covers_parsed_result_and_source_fields(serpapi_page: dict
 
 def test_bronze_schema_is_source_plus_tracking_columns() -> None:
     """Bronze keeps every source column and adds the MERGE-maintained history columns."""
-    assert BRONZE_SCHEMA.fieldNames() == [*SOURCE_SCHEMA.fieldNames(), "first_seen_at", "is_listed"]
+    assert SEARCH_RESULTS_SCHEMA.fieldNames() == [*SOURCE_SCHEMA.fieldNames(), "first_seen_at", "is_listed"]
 
 
 def test_silver_metadata_schema_matches_curated_rows(serpapi_page: dict) -> None:
@@ -38,14 +36,9 @@ def test_silver_metadata_schema_matches_curated_rows(serpapi_page: dict) -> None
         "is_listed": True,
     }
 
-    assert SILVER_METADATA_SCHEMA.fieldNames() == list(curate_document(bronze_row))
+    assert REGISTER_METADATA_SCHEMA.fieldNames() == list(curate_document(bronze_row))
 
 
 def test_silver_schema_adds_storage_columns_owned_by_download() -> None:
     """Silver is the curated metadata plus processed and volume_path, set by the download job."""
-    assert SILVER_SCHEMA.fieldNames() == [*SILVER_METADATA_SCHEMA.fieldNames(), "processed", "volume_path"]
-
-
-def test_embedded_chunks_schema_is_the_chunks_schema_plus_an_embedding() -> None:
-    """The searchable chunks table adds only the embedding column, so it syncs the same metadata."""
-    assert EMBEDDED_CHUNKS_SCHEMA.fieldNames() == [*CHUNKS_SCHEMA.fieldNames(), "embedding"]
+    assert REGISTER_SCHEMA.fieldNames() == [*REGISTER_METADATA_SCHEMA.fieldNames(), "processed", "volume_path"]

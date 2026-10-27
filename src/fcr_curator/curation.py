@@ -1,4 +1,4 @@
-"""Rules that turn raw search results (bronze) into curated FCRs (silver).
+"""Rules that turn the raw search results into curated FCRs, the register.
 
 Search results are noisy: next to Bermuda FCRs they include annual reports and press releases. In the
 Bermuda context a "Financial Condition Report" and a "Solvency and Financial Condition Report" are the
@@ -154,7 +154,7 @@ def _no_entity(document: dict) -> None:
 
 
 def curate_document(raw: dict, today: date | None = None, resolve_entity: EntityResolver = _no_entity) -> dict:
-    """Turn one bronze row into a silver row (before filtering and de-duplication)."""
+    """Turn one search-results row into a register row (before filtering and de-duplication)."""
     url, title, snippet = raw.get("pdf_url"), raw["title"], raw.get("snippet")
     search_queries = list(raw.get("search_queries") or [])
     # Google's filetype:pdf only returns PDFs, so trust it when the URL has no extension
@@ -229,7 +229,7 @@ def curate(
     today: date | None = None,
     resolve_entity: EntityResolver = _no_entity,
 ) -> list[dict]:
-    """Curate every bronze row: keep PDFs not on an excluded domain, then de-duplicate.
+    """Curate every search-results row: keep PDFs not on an excluded domain, then de-duplicate.
 
     resolve_entity names each document's insurer as the reference list has it (registered_name).
     """
@@ -237,11 +237,11 @@ def curate(
     return deduplicate([d for d in curated if d["file_type"] in file_types and not is_excluded_domain(d["domain"])])
 
 
-# --- Filters for silver -----------------------------------------------------------------------
+# --- Filters for the register -----------------------------------------------------------------
 
 
 def keep_doc_kinds(documents: Iterable[dict], doc_kinds: Iterable[str]) -> list[dict]:
-    """Keep documents of the given kinds. An empty or misspelt kind is an error, not an empty silver."""
+    """Keep documents of the given kinds. An empty or misspelt kind is an error, not an empty register."""
     kinds = set(doc_kinds)
     if not kinds or not kinds <= set(DOC_KINDS):
         raise ValueError(f"doc_kinds must be a non-empty subset of {list(DOC_KINDS)}, got {sorted(kinds)}")

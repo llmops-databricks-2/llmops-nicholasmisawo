@@ -1,9 +1,9 @@
-"""Decide which SerpAPI searches a bronze run makes.
+"""Decide which SerpAPI searches a run of the search task makes.
 
 The plan allows 1,000 searches a month, and even an empty results page costs one, so every run asks
 only the queries most likely to find an FCR PDF we don't have yet. In priority order:
 
-1. missing_year  - site: query for a domain that has an FCR in silver, but not for the latest year
+1. missing_year  - site: query for a domain with an FCR in the register, but not for the latest year
 2. institution   - query for an insurer you named that has no FCR for the latest year
 3. discovery     - generic queries per reporting year; the only way to find new websites
 
@@ -58,10 +58,10 @@ class QueryHistory:
 
 @dataclass(frozen=True)
 class Coverage:
-    """Reporting years silver already has an FCR for, by domain and by institution."""
+    """Reporting years the register already has an FCR for, by domain and by institution."""
 
     domains: Mapping[str, set[int]]
-    institutions: Mapping[str, set[int]]  # Keyed by silver's institution name
+    institutions: Mapping[str, set[int]]  # Keyed by the register's institution name
 
 
 # --- Query text -------------------------------------------------------------------------------
@@ -80,11 +80,11 @@ def institution_query(name: str) -> str:
 # --- What we already have ---------------------------------------------------------------------
 
 
-def coverage(silver_rows: Iterable[dict]) -> Coverage:
-    """Collect which reporting years silver holds, per domain and per institution."""
+def coverage(register_rows: Iterable[dict]) -> Coverage:
+    """Collect which reporting years the register holds, per domain and per institution."""
     domains: dict[str, set[int]] = defaultdict(set)
     institutions: dict[str, set[int]] = defaultdict(set)
-    for row in silver_rows:
+    for row in register_rows:
         year = row.get("reporting_year")
         if not year:
             continue

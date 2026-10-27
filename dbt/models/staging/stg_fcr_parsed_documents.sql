@@ -3,5 +3,5 @@ select
     document_id,
     parsed_content,
     nullif(nullif(parse_errors, 'null'), '[]') as parse_errors
-from {{ source('landed', 'silver_parsed_fcr_documents') }}
+from {{ source('landed', 'raw_fcr_parsed_documents') }}
 where parsed_content is not null

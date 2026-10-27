@@ -1,17 +1,16 @@
 """Column layouts of every Delta table, in pipeline order.
 
-bronze_fcr_search_log         one row per SerpAPI search          (SEARCH_LOG_SCHEMA)
-bronze_fcr_documents          every search result found           (BRONZE_SCHEMA)
-silver_fcr_documents          curated FCRs + where each file is   (SILVER_SCHEMA)
-silver_parsed_fcr_documents   ai_parse_document output            (PARSED_SCHEMA)
-gold_fcr_chunks               cleaned chunks + FCR metadata       (CHUNKS_SCHEMA)
-gold_fcr_chunks_by_section    the same, plus an embedding         (EMBEDDED_CHUNKS_SCHEMA)
+raw_fcr_search_log            one row per SerpAPI search          (SEARCH_LOG_SCHEMA)
+raw_fcr_search_results        every FCR PDF found                 (SEARCH_RESULTS_SCHEMA)
+raw_fcr_register              curated FCRs + where each file is   (REGISTER_SCHEMA)
+raw_fcr_parsed_documents      ai_parse_document output            (PARSED_SCHEMA)
+
+These are what Python lands; dbt builds everything after them (dbt/models).
 """
 
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,
-    FloatType,
     IntegerType,
     LongType,
     StringType,
@@ -36,7 +35,7 @@ SOURCE_SCHEMA = StructType(
     ]
 )
 
-# bronze_fcr_search_log: one row per billed SerpAPI search, append-only; search_plan reads it to skip
+# raw_fcr_search_log: one row per billed SerpAPI search, append-only; search_plan reads it to skip
 # queries asked recently
 SEARCH_LOG_SCHEMA = StructType(
     [
@@ -49,17 +48,17 @@ SEARCH_LOG_SCHEMA = StructType(
     ]
 )
 
-# Set by the bronze MERGE rather than by the source, so history survives re-runs
-BRONZE_TRACKING_FIELDS = [
+# Set by the search-results MERGE rather than by the source, so history survives re-runs
+TRACKING_FIELDS = [
     StructField("first_seen_at", StringType(), True),  # Ingest run that first inserted the row
     StructField("is_listed", BooleanType(), True),  # False once the latest search stops returning the URL
 ]
 
-# bronze_fcr_documents: every search result any run has found, as the source returned it
-BRONZE_SCHEMA = StructType([*SOURCE_SCHEMA.fields, *BRONZE_TRACKING_FIELDS])
+# raw_fcr_search_results: every FCR PDF any run has found, by search or on a page, as the source returned it
+SEARCH_RESULTS_SCHEMA = StructType([*SOURCE_SCHEMA.fields, *TRACKING_FIELDS])
 
-# Curated metadata (see curation.curate), refreshed from bronze on every ingest
-SILVER_METADATA_SCHEMA = StructType(
+# Curated metadata (see curation.curate), refreshed from the search results on every run
+REGISTER_METADATA_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
         StructField("source", StringType(), True),
@@ -87,10 +86,10 @@ STORAGE_FIELDS = [
     StructField("volume_path", StringType(), True),
 ]
 
-# silver_fcr_documents: curated FCRs plus where each file landed in the volume
-SILVER_SCHEMA = StructType([*SILVER_METADATA_SCHEMA.fields, *STORAGE_FIELDS])
+# raw_fcr_register: curated FCRs plus where each file landed in the volume
+REGISTER_SCHEMA = StructType([*REGISTER_METADATA_SCHEMA.fields, *STORAGE_FIELDS])
 
-# silver_parsed_fcr_documents: ai_parse_document output for each downloaded silver FCR, parsed once
+# raw_fcr_parsed_documents: ai_parse_document output for each downloaded FCR, parsed once
 PARSED_SCHEMA = StructType(
     [
         StructField("document_id", StringType(), False),
@@ -100,25 +99,3 @@ PARSED_SCHEMA = StructType(
         StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that parsed the file
     ]
 )
-
-# gold_fcr_chunks: cleaned text chunks with the FCR's metadata, the RAG source; not embedded yet
-CHUNKS_SCHEMA = StructType(
-    [
-        StructField("id", StringType(), False),  # <document_id>_<chunk_id>, the vector index primary key
-        StructField("document_id", StringType(), False),
-        StructField("chunk_id", StringType(), True),
-        StructField("page_id", IntegerType(), True),  # Page the chunk starts on, for citations
-        StructField("text", StringType(), True),
-        StructField("title", StringType(), True),
-        StructField("institution", StringType(), True),
-        StructField("registered_name", StringType(), True),
-        StructField("domain", StringType(), True),
-        StructField("reporting_year", IntegerType(), True),
-        StructField("file_url", StringType(), True),
-        StructField("processed", LongType(), True),  # yyyyMMddHHmm of the run that chunked the document
-    ]
-)
-
-# The chunks table kept for search also holds each chunk's embedding (None until embedded)
-EMBEDDING_FIELD = StructField("embedding", ArrayType(FloatType()), True)
-EMBEDDED_CHUNKS_SCHEMA = StructType([*CHUNKS_SCHEMA.fields, EMBEDDING_FIELD])

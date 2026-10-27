@@ -3,7 +3,7 @@
 Bermuda insurers publish FCRs on their own websites, so there is no single list to scrape; we search
 instead. fetch_fcr_documents asks the planned queries (see search_plan.py) and returns:
 
-- documents: one row per distinct result URL, for the bronze table
+- documents: one row per distinct result URL, for raw_fcr_search_results
 - log: one row per search made, for the search log table, so later runs know what was asked
 
 Nothing is downloaded here, and whether a result really is an FCR is decided later, in curation.py.
@@ -98,7 +98,7 @@ def search_page(session: requests.Session, api_key: str, query: str, start: int 
 
 
 def parse_results(results: list[dict], query: str, rank_offset: int = 0) -> list[dict]:
-    """Turn Google results into bronze rows, skipping any result without a link."""
+    """Turn Google results into search-results rows, skipping any result without a link."""
     return [
         {
             "document_id": document_id(result["link"]),
@@ -130,7 +130,7 @@ def merge_rows(rows: Iterable[dict]) -> list[dict]:
         queries[url_id].update(row["search_queries"])
         if url_id not in best or row["search_rank"] < best[url_id]["search_rank"]:
             best[url_id] = row
-    # Sorted, so the same queries always compare equal in the bronze MERGE
+    # Sorted, so the same queries always compare equal in the search-results MERGE
     return [{**row, "search_queries": sorted(queries[url_id])} for url_id, row in best.items()]
 
 

@@ -11,15 +11,23 @@ from pyspark.sql.types import StructType
 
 from fcr_curator.schemas import STORAGE_FIELDS
 
+# Tables the Python pipeline lands, which dbt reads as sources (dbt/models/staging/_sources.yml)
+SEARCH_RESULTS_TABLE = "raw_fcr_search_results"  # Every FCR PDF found by search or on a disclosures page
+SEARCH_LOG_TABLE = "raw_fcr_search_log"  # One row per SerpAPI search made
+REGISTER_TABLE = "raw_fcr_register"  # Curated FCRs, one per company and year, with their downloads
+PARSED_TABLE = "raw_fcr_parsed_documents"  # ai_parse_document output per downloaded FCR
+# Built by dbt (models/context/ai/fcr_knowledge_base.sql) and synced to Lakebase for search
+KNOWLEDGE_BASE_TABLE = "fcr_knowledge_base"
+
 KEY = "document_id"
-# Ignored when deciding if a bronze row changed: the run time changes every run, and Google reorders results
+# Ignored when deciding if a search-results row changed: the run time changes every run, and Google reorders results
 VOLATILE_COLUMNS = ("ingestion_timestamp", "search_rank")
-# Bronze keeps every query that ever found a row, not just this run's
+# The search results keep every query that ever found a row, not just this run's
 ACCUMULATED_COLUMNS = ("search_queries",)
 
 
 def ensure_table(spark: SparkSession, name: str, schema: StructType, layer: str, comment: str) -> None:
-    """Create the table if it's missing, then set its description and medallion layer."""
+    """Create the table if it's missing, then set its description and layer."""
     if not spark.catalog.tableExists(name):
         spark.createDataFrame([], schema).write.format("delta").saveAsTable(name)
     escaped_comment = comment.replace("'", "\\'")
@@ -73,11 +81,11 @@ def _queries_so_far(column: str) -> str:
     return f"array_sort(array_union(coalesce(existing.{column}, array()), incoming.{column}))"
 
 
-# --- Bronze -----------------------------------------------------------------------------------
+# --- Search results ---------------------------------------------------------------------------
 
 
-def bronze_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
-    """MERGE this run's search results into bronze.
+def search_results_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
+    """MERGE this run's search results into the search-results table.
 
     - New URL: inserted, with first_seen_at = this run and is_listed = true.
     - Known URL: updated only if something real changed (not just its rank or run time), a new query
@@ -115,7 +123,7 @@ def bronze_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
 
 
 def delisted_ids(listed_rows: Iterable[dict], asked_queries: Iterable[str], returned_ids: Iterable[str]) -> list[str]:
-    """Bronze rows to mark is_listed = false after this run.
+    """Search-results rows to mark is_listed = false after this run.
 
     Only when every query that ever found the row was asked again this run and none of them returned
     it. A query the run didn't ask tells us nothing about the rows it found before.
@@ -138,11 +146,11 @@ def delist_sql(target: str, ids_view: str) -> str:
     """
 
 
-# --- Silver -----------------------------------------------------------------------------------
+# --- The FCR register -------------------------------------------------------------------------
 
 
-def silver_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
-    """MERGE the curated FCRs into silver.
+def register_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
+    """MERGE the curated FCRs into the register.
 
     - New FCR: inserted with processed and volume_path empty, until it's downloaded.
     - Known FCR: updated if its metadata changed; processed and volume_path are never touched.
@@ -165,7 +173,7 @@ def silver_merge_sql(target: str, source_view: str, columns: list[str]) -> str:
 
 
 def record_downloads_sql(target: str, downloads_view: str) -> str:
-    """Set processed and volume_path on the silver rows whose files were just downloaded."""
+    """Set processed and volume_path on the register rows whose files were just downloaded."""
     return f"""
         MERGE INTO {target} AS existing
         USING {downloads_view} AS downloaded
@@ -173,32 +181,4 @@ def record_downloads_sql(target: str, downloads_view: str) -> str:
         WHEN MATCHED THEN UPDATE SET
             existing.processed = downloaded.processed,
             existing.volume_path = downloaded.volume_path
-    """
-
-
-# --- Gold -------------------------------------------------------------------------------------
-
-
-def refresh_chunk_metadata_sql(chunks_table: str, documents_table: str, columns: list[str]) -> str:
-    """MERGE silver's current metadata onto the chunks of each FCR, where it has changed.
-
-    Chunks are written once, so without this they keep the metadata they had then: a better institution
-    name, a reporting year fixed by curation, or a new registered_name wouldn't reach search.
-    """
-    return f"""
-        MERGE INTO {chunks_table} AS existing
-        USING {documents_table} AS document
-        ON existing.{KEY} = document.{KEY}
-        WHEN MATCHED AND ({" OR ".join(_changed(column, f"document.{column}") for column in columns)}) THEN
-            UPDATE SET {", ".join(f"existing.{column} = document.{column}" for column in columns)}
-    """
-
-
-def record_embeddings_sql(target: str, embeddings_view: str) -> str:
-    """Set the embedding on the chunks whose id is in embeddings_view."""
-    return f"""
-        MERGE INTO {target} AS existing
-        USING {embeddings_view} AS embedded
-        ON existing.id = embedded.id
-        WHEN MATCHED THEN UPDATE SET existing.embedding = embedded.embedding
     """

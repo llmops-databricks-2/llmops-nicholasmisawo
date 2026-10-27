@@ -1,7 +1,7 @@
 """Find FCR PDFs by reading the pages that link to them, listed in the reference file's `fcr_pages`.
 
 A company's disclosures page usually links every FCR it has published. Reading it costs no SerpAPI
-searches and finds older years that search ranks poorly. Each PDF link becomes a bronze row like a search
+searches and finds older years that search ranks poorly. Each PDF link becomes a search-results row like a search
 result, so curation, downloads and chunking treat both sources the same.
 
 Links are kept only if they point at a PDF; whether a PDF is an FCR (and not, say, annual accounts) is
@@ -42,7 +42,7 @@ class PdfLink:
 class PageRead(NamedTuple):
     """The outcome of reading every listed page."""
 
-    documents: list[dict]  # One bronze row per distinct PDF link
+    documents: list[dict]  # One search-results row per distinct PDF link
     pages_read: list[str]  # Pages that loaded, so their missing links can be delisted
     errors: list[str]  # Pages that didn't load, with why
 
@@ -104,7 +104,7 @@ def _title(link: PdfLink) -> str:
 
 
 def page_rows(links: Iterable[PdfLink], entity: ReferenceEntity, page_url: str) -> list[dict]:
-    """Turn a page's PDF links into bronze rows, credited to the entity whose page it is."""
+    """Turn a page's PDF links into search-results rows, credited to the entity whose page it is."""
     return [
         {
             "document_id": url_document_id(link.url, SOURCE),
@@ -122,15 +122,15 @@ def page_rows(links: Iterable[PdfLink], entity: ReferenceEntity, page_url: str) 
 
 
 def page_query(page_url: str) -> str:
-    """Return how a page is recorded in search_queries, so bronze can tell which page found a row."""
+    """Return how a page is recorded in search_queries, so a row shows which page found it."""
     return f"page:{normalize_url(page_url)}"
 
 
 def fetch_page_documents(session: requests.Session, entities: Iterable[ReferenceEntity]) -> PageRead:
-    """Read every entity's fcr_pages and return one bronze row per PDF link found.
+    """Read every entity's fcr_pages and return one search-results row per PDF link found.
 
     A page that fails to load is logged and listed in errors, and the others still run: one moved page
-    shouldn't stop the rest of bronze.
+    shouldn't stop the rest of the search task.
     """
     run_at = datetime.now(UTC).isoformat()
     rows: dict[str, dict] = {}

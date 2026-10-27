@@ -1,12 +1,10 @@
-"""Two ways to split a parsed FCR into chunks, so they can be compared side by side.
+"""Split a parsed FCR into section chunks, the chunking dbt's chunk_fcr_sections model runs.
 
-Both read the elements ai_parse_document found (text, section_header, table, page_header, ...).
-
-1. element_chunks: one chunk per text or table element. Simple, but sizes vary wildly (a lone
-   company name is a chunk; a whole table can be 36k characters) and section headings are lost.
-2. section_chunks: chunks follow the document's sections, like Unstructured's by_title strategy.
-   Every chunk starts with its section heading, short sections are merged, long text and tables
-   are split to a size limit.
+Reads the elements ai_parse_document found (text, section_header, table, page_header, ...). Chunks
+follow the document's sections, like Unstructured's by_title strategy: every chunk starts with its
+section heading, short sections are merged, and long text and tables are split to a size limit. One
+chunk per element, the baseline it was measured against, leaves lone company names as chunks and
+whole tables of 36k characters (docs/04-chunking.md).
 
 Plain Python, so the rules can be tested without Spark.
 """
@@ -15,10 +13,6 @@ import json
 import re
 from typing import NamedTuple
 
-# Strategy 1 keeps these element types; titles, headers, footers and page numbers are dropped
-ELEMENT_CHUNK_TYPES = ("text", "table")
-
-# Strategy 2
 HEADING_TYPES = ("title", "section_header")  # Start a new section
 TEXT_TYPES = ("text", "caption")  # Packed together within a section
 MAX_CHUNK_CHARS = 2000  # About 500 tokens
@@ -51,20 +45,7 @@ def _first_page(element: dict) -> int | None:
     return boxes[0].get("page_id") if boxes else None
 
 
-# --- Strategy 1: one chunk per element --------------------------------------------------------
-
-
-def element_chunks(parsed_content_json: str | None) -> list[Chunk]:
-    """Return one chunk per non-empty text or table element, keyed by the element's id."""
-    chunks = []
-    for element in _elements(parsed_content_json):
-        text = clean_chunk(element.get("content", ""))
-        if element.get("type") in ELEMENT_CHUNK_TYPES and text:
-            chunks.append(Chunk(str(element.get("id", "")), _first_page(element), text))
-    return chunks
-
-
-# --- Strategy 2: one chunk per section, size-limited ------------------------------------------
+# --- Section chunks ---------------------------------------------------------------------------
 
 
 def split_text(text: str, limit: int) -> list[str]:

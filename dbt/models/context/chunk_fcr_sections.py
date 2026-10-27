@@ -2,7 +2,7 @@
 
 Python, not the package's SQL chunk(): section_chunks follows the FCR's headings, starts every chunk
 with its section heading and splits tables by rows, which measured far better on FCRs than packing
-units by token count (docs/02-chunking.md). Chunking is cheap and deterministic, so the table is
+units by token count (docs/04-chunking.md). Chunking is cheap and deterministic, so the table is
 rebuilt each run; the same text always gets the same id and content_hash, so its embedding is reused.
 """
 

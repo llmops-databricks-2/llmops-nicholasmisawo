@@ -1,8 +1,8 @@
-"""Tests for the two chunking strategies that turn ai_parse_document output into chunks."""
+"""Tests for splitting ai_parse_document output into section chunks."""
 
 import json
 
-from fcr_curator.chunking import Chunk, clean_chunk, element_chunks, section_chunks, split_table, split_text
+from fcr_curator.chunking import clean_chunk, section_chunks, split_table, split_text
 
 
 def parsed(*elements: dict) -> str:
@@ -26,45 +26,7 @@ def test_clean_chunk_collapses_newlines_and_whitespace() -> None:
     assert clean_chunk("  Class 3A\n\ninsurers   must\tfile  ") == "Class 3A insurers must file"
 
 
-def test_element_chunks_keeps_text_and_tables_only() -> None:
-    """Titles, headers, footers and page numbers are left out; text and tables are kept in order."""
-    content = parsed(
-        element(0, "title", "Financial Condition Report"),
-        element(1, "text", "The Company's BSCR ratio"),
-        element(2, "page_footer", "Example Re"),
-        element(3, "table", "<table><tr><td>Capital</td></tr></table>"),
-        element(4, "page_number", "2"),
-    )
-
-    assert [chunk.chunk_id for chunk in element_chunks(content)] == ["1", "3"]
-
-
-def test_element_chunks_records_cleaned_text_and_first_page() -> None:
-    """Each chunk carries its element id as a string, its first page, and cleaned text."""
-    content = parsed(element(7, "text", "solvency ratio\nof 250%", page_id=4))
-
-    assert element_chunks(content) == [Chunk("7", 4, "solvency ratio of 250%")]
-
-
-def test_element_chunks_leaves_page_unset_without_a_bounding_box() -> None:
-    """An element with no bounding box has no page."""
-    content = parsed(element(1, "text", "Annex", page_id=None))
-
-    assert element_chunks(content)[0].page_id is None
-
-
-def test_element_chunks_drops_elements_empty_after_cleaning() -> None:
-    """Whitespace-only text would embed as noise, so it isn't a chunk."""
-    assert element_chunks(parsed(element(1, "text", " \n\t "))) == []
-
-
-def test_element_chunks_returns_nothing_for_missing_content() -> None:
-    """A document whose parse produced no content yields no chunks rather than failing."""
-    assert element_chunks(None) == []
-    assert element_chunks(json.dumps({"error_status": [{"error_message": "x"}]})) == []
-
-
-# --- Strategy 2: section chunks ---------------------------------------------------------------
+# --- Section chunks ---------------------------------------------------------------------------
 
 
 def texts(content: str, **limits: int) -> list[str]:
