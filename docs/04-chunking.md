@@ -1,4 +1,4 @@
-# 02 Chunking
+# 04 Chunking
 
 ## Parsing
 
@@ -19,18 +19,18 @@ What the parser found across the 78 FCRs:
 | title | 639 | Strategy 2 only, as headings |
 | footnote, caption, signature | 858 | Captions only (strategy 2) |
 
-## Two strategies (`chunking.py`)
+## Two strategies, compared
 
-1. **Per element** (`gold_fcr_chunks`): one chunk per text or table element.
-2. **Per section** (`gold_fcr_chunks_by_section`), like Unstructured's `by_title`:
+1. **Per element**: one chunk per text or table element, the baseline.
+2. **Per section** (`chunking.py`, run by dbt's `chunk_fcr_sections`), like Unstructured's `by_title`:
    - a heading starts a section, and every chunk from it begins with the heading
    - text is packed up to 2,000 characters (about 500 tokens), split at sentence ends
    - a section under 200 characters merges into the next
    - tables get chunks of their own, split by rows with the header row repeated
 
 Every chunk carries its FCR's `registered_name`, `institution`, `reporting_year`, `domain`, `title`,
-`file_url` and `page_id` (counted from 0, as the parser numbers pages). Every run refreshes this metadata
-from silver, so a better name or a corrected year reaches chunks written earlier.
+`file_url` and `page_id` (counted from 0, as the parser numbers pages). Every run reads this metadata
+fresh from the register, so a better name or a corrected year reaches chunks written earlier.
 
 ## Findings: the comparison
 
@@ -42,9 +42,9 @@ from silver, so a better name or a corrected year reaches chunks written earlier
 | Over 2,000 characters | 1,594 | **192** (−88%) |
 | Largest | 35,926 | **3,548** |
 
-The section strategy is kept for search. It removed the noise (lone company names such as
-"Steamship Mutual", labels such as "(absolute amount)"), cut oversized tables down, and labelled every
-table. The same Wilton Re FCR, before and after:
+The section strategy is the one search uses. It removes the noise (lone company names such as
+"Steamship Mutual", labels such as "(absolute amount)"), cuts oversized tables down, and labels every
+table. The same Wilton Re table under each:
 
 | Per element | Per section |
 |---|---|

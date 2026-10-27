@@ -1,11 +1,11 @@
-# Environment
+# 01 Environment
 
 ## Provisioned resources
 
 | Resource | Value |
 |---|---|
 | Schemas | `llmops_dev.nicholasmisawo`, `llmops_acc.nicholasmisawo`, `llmops_prd.nicholasmisawo` |
-| Volume | `fcr_documents` (created by the silver task) |
+| Volume | `fcr_documents` (created by the `curate_and_download_fcrs` task) |
 | SQL warehouse | `0e56acba898dad4a` (`wh-llmops-nicholasmisawo`) |
 | Usage policy | `ffe08ae3-a783-3201-ab0c-2fff24538807` |
 | MLflow experiments | `/llmops/nicholasmisawo-dev`, `-acc`, `-prd` |

@@ -1,21 +1,22 @@
-# 04 Search
+# 06 Search
 
-One question goes through every retrieval technique in `notebooks/03_retrieval/search_fcr_chunks.py`,
-so the effect of each shows. It queries Postgres, so run it from your machine:
+One question goes through every retrieval technique in `notebooks/03_retrieval/search_knowledge_base.py`,
+so the effect of each shows. It searches the Lakebase copy of the dbt knowledge base
+(`nicholasmisawo.fcr_knowledge_base_lakebase_<target>`) over Postgres, so run it from your machine:
 
 ```bash
-env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_fcr_chunks.py
+env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_knowledge_base.py
 ```
 
 | Step | Module | What it does |
 |---|---|---|
 | Query rewriting | `query_rewriting.py` | The chat model rewrites the question in FCR terms and pulls out filters ((re)insurer, year; "last year" resolved against today) |
 | Semantic search | `search.py` | pgvector cosine distance (`<=>`); cosine because the embeddings aren't normalised |
-| Filters | `search.py` | (Re)insurer matched loosely on its reference name, institution, domain and title (`Wilton Re` finds `wiltonre.bm`); year exactly |
+| Filters | `search.py` | (Re)insurer matched loosely on the company (`account_key`) and the citation URL, which holds the domain (`Wilton Re` finds `wiltonre.bm`); year from `ts` |
 | Keyword search | `search.py` | Postgres full-text search for any of the words, ranked by `ts_rank_cd` |
 | Hybrid search | `search.py` | Both rankings fused with Reciprocal Rank Fusion (k = 60) |
 | Reranking | `reranking.py` | One chat call reorders the 20 hybrid candidates by usefulness, keeping the top 5 |
-| Token budget | `context_budget.py` | The best hits packed under 1,500 estimated tokens, each cited with (re)insurer, year, page and URL |
+| Token budget | `context_budget.py` | The best hits packed under 1,500 estimated tokens, each cited with (re)insurer, year, page and a link that opens that page |
 
 ## Findings: what each step changed
 
@@ -38,12 +39,12 @@ Wilton Re's 2024 cover was about 245%.
 
 - **The reranker first dropped every chunk.** Wilton Re never states a ratio, only the figures to work it out from, and "leave out excerpts that don't help" was read strictly. The prompt now counts excerpts holding the figures needed as useful.
 - **Results vary slightly between runs**, because the chat model isn't deterministic: the rewritten text and the number of reranked hits changed. Setting `temperature=0` is untested.
-- **EU/UK reports in the index** show up whenever filters are off (see [01 Data pipeline](01-data-pipeline.md#findings)).
+- **EU/UK reports in the index** show up whenever filters are off (see [03 Data pipeline](03-data-pipeline.md#findings)).
 
 ## Testing from the UI
 
-`notebooks/03_retrieval/search_examples.sql` has the same searc
-hes as SQL, with no Python needed.
+`notebooks/03_retrieval/search_examples.sql` has the same searches as SQL, with no Python needed. Each
+returns the company, reporting year, an excerpt and the `citation_url` that opens the cited page.
 
 | Query | Editor | Expected top result |
 |---|---|---|

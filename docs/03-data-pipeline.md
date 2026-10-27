@@ -1,19 +1,21 @@
-# 01 Data pipeline
+# 03 Data pipeline
 
 Bermuda insurers and reinsurers publish their FCRs on their own websites, so there's no single listing to scrape. The
 pipeline finds them with Google search (through SerpAPI), curates the results, and downloads the PDFs.
 
 ## The job
 
-One job, `fcr_pipeline-<target>`, runs the stages in order; each starts only when the one before succeeds.
-Every task is a serverless notebook running the packaged wheel, with settings from `project_config.yml`.
+One job, `fcr_pipeline-<target>`, runs the stages in order; each starts only when the one before succeeds,
+and only one run goes at a time (a second start queues). Python lands the raw data; dbt builds the rest.
 
-| Task | Notebook | Writes |
+| Task | Runs | Writes |
 |---|---|---|
-| `bronze_fcr_documents` | `01_ingestion/bronze_fcr_documents.py` | `bronze_fcr_documents`, `bronze_fcr_search_log` |
-| `silver_fcr_documents` | `01_ingestion/silver_fcr_documents.py` | `silver_fcr_documents`; PDFs in the `fcr_documents` volume |
-| `process_fcr_documents` | `02_processing/process_fcr_documents.py` | `silver_parsed_fcr_documents`, `gold_fcr_chunks`, `gold_fcr_chunks_by_section` |
-| `sync_fcr_chunks_to_lakebase` | `03_retrieval/sync_fcr_chunks_to_lakebase.py` | Lakebase synced table `fcr_chunks_<target>` |
+| `dbt_seed` | dbt | `ref_bermuda_entities` (the reference list, tested) |
+| `search_fcrs` | `01_ingestion/search_fcrs.py` | `raw_fcr_search_results`, `raw_fcr_search_log` |
+| `curate_and_download_fcrs` | `01_ingestion/curate_and_download_fcrs.py` | `raw_fcr_register`; PDFs in the `fcr_documents` volume |
+| `parse_fcr_documents` | `02_processing/parse_fcr_documents.py` | `raw_fcr_parsed_documents` |
+| `dbt_context` | dbt | staging, intermediate and context models, `fcr_knowledge_base`, `dim_fcr_companies` ([05 Layers](02-layers-and-dbt.md)) |
+| `sync_knowledge_base_to_lakebase` | `03_retrieval/sync_knowledge_base_to_lakebase.py` | Lakebase synced table `fcr_knowledge_base_lakebase_<target>` |
 
 It runs weekly, Mondays at 06:00 Bermuda time. The schedule is paused in `dev` and `acc` and active in
 `prd` (`schedule_pause_status` in `databricks.yml`). Parameters: `env` (defaults to the target) and
@@ -21,25 +23,25 @@ It runs weekly, Mondays at 06:00 Bermuda time. The schedule is paused in `dev` a
 
 ## Search on a budget
 
-The SerpAPI plan allows 1,000 searches a month, and an empty results page still counts as one. Bronze
-spends searches only where a new FCR is likely (`search_plan.py`):
+The SerpAPI plan allows 1,000 searches a month, and an empty results page still counts as one. The search
+task spends searches only where a new FCR is likely (`search_plan.py`):
 
 | Priority | Query | Asked when | Pages |
 |---|---|---|---|
-| 1. `missing_year` | `site:<domain> "financial condition report" <year> filetype:pdf` | A domain in silver lacks the latest reporting year | 1 |
+| 1. `missing_year` | `site:<domain> "financial condition report" <year> filetype:pdf` | A domain in the register lacks the latest reporting year | 1 |
 | 2. `institution` | `"<name>" "financial condition report" filetype:pdf` | A named (re)insurer (`SearchSettings.institutions`) lacks the latest year | 1 |
 | 3. `discovery` | Three templates for each of the last 3 reporting years: "financial condition report" Bermuda, the same with "Bermuda Monetary Authority", and "solvency and financial condition report" Bermuda | Always; the only way to find new domains | 2 |
 
-The `institution` names come from the reference list, the dbt seed **`dbt/seeds/bermuda_reinsurers.csv`** (table `ref_bermuda_reinsurers`, tested by dbt), loaded by
+The `institution` names come from the reference list, the dbt seed **`dbt/seeds/bermuda_entities.csv`** (table `ref_bermuda_entities`, tested by dbt), loaded by
 `reference.py` and searched **largest assets first**, so if a run's budget runs out, the smallest wait.
-The file is a seed list of the top 20 Bermuda reinsurers; a fuller register (such as the BMA's, with
-licence classes) can replace it without code changes. A name is matched to silver after removing legal
-suffixes, by prefix, and only if the key is 4 or more characters, so a generic silver name such as "Group"
+The list started as the top 20 Bermuda reinsurers and will add insurers; a fuller register (such as the BMA's, with
+licence classes) can replace it without code changes. A name is matched to the register after removing legal
+suffixes, by prefix, and only if the key is 4 or more characters, so a generic register name such as "Group"
 can't mark every "… Group" (re)insurer as already covered. Several seed names are out of date (Validus,
 Watford, Third Point Re, Ironshore and Argo were acquired or merged; Everest Re Group is now Everest
 Group), and their searches show how stale names fare.
 
-- **No repeats**: every search is logged in `bronze_fcr_search_log`, and a query waits 28 days before it runs again, or 90 if it found nothing FCR-like.
+- **No repeats**: every search is logged in `raw_fcr_search_log`, and a query waits 28 days before it runs again, or 90 if it found nothing FCR-like.
 - **No wasted pages**: a second page is asked only when the first was full and held something FCR-like.
 - **Targeted results**: every search sends `gl=bm` (rank as if from Bermuda), `lr=lang_en` and `nfpr=1` (no auto-correction). `cr=countryBM` and date filters are left out: most FCRs are hosted outside Bermuda, and Google's PDF dates are unreliable.
 - **Hard caps**: a free account check comes first, then at most `min(150, searches left − 100)` per run, or about 650 a month at most.
@@ -56,18 +58,18 @@ databricks secrets put-secret fcr_curator serpapi_api_key --profile <profile>
 ## Disclosures pages (`sources/pages.py`)
 
 Many companies link every FCR they've published from one page. The reference file's `fcr_pages` column
-lists such pages (full URLs; `;` between several), and bronze reads each one on every run, at no search
-cost. Every PDF link becomes a bronze row (`source = "pages"`), with the heading it sits under as its
+lists such pages (full URLs; `;` between several), and the search task reads each one on every run, at no
+search cost. Every PDF link becomes a search-results row (`source = "pages"`), with the heading it sits under as its
 snippet and the readable filename as its title when the link just says "View". Curation then keeps the
 FCRs and drops the rest (annual accounts, policy statements).
 
-A page that fails to load is logged and retried next run; the rest of bronze carries on. A PDF a page no
+A page that fails to load is logged and retried next run; the rest of the search task carries on. A PDF a page no
 longer links is delisted, like a search result no longer returned. Keep `domains` to hosts only: they
 match FCRs to companies, and a path there would never match.
 
 | Page | Finding |
 |---|---|
-| `https://www.antaresglobal.com/antares-re` | 15 PDF links, 4 of them FCRs (2024, 2021, 2020, 2019); 3 reach silver (2020 or later) |
+| `https://www.antaresglobal.com/antares-re` | 15 PDF links, 4 of them FCRs (2024, 2021, 2020, 2019); 3 reach the register (2020 or later) |
 | `https://www.sompo.com/reinsurance` | Reads fine but links no FCRs (company overviews, modern slavery statements) |
 
 Two curation fixes came from testing this source: documents are de-duplicated **within their kind**, so
@@ -76,7 +78,7 @@ so the same PDF found by a search and on a page isn't counted twice.
 
 ## Curation (`curation.py`)
 
-Silver re-curates all of bronze each run:
+The curation task re-curates all the search results each run:
 
 - **PDFs only**: a `.pdf` URL, or an extensionless one that a `filetype:pdf` query found. Each download is checked for a PDF header; a login or landing page is removed.
 - **Excluded sites**: `bma.bm` and `.gov` (with subdomains), in curation and as `-site:` in queries.
@@ -85,30 +87,30 @@ Silver re-curates all of bronze each run:
 - **Institution**: the title before the report's name, else the site's name.
 - **One per (re)insurer and year**: duplicates on a domain are merged, keeping one that search still returns, then the best-ranked; the others' ids go in `superseded_ids`.
 - **Entity name**: each FCR is matched to the reference list, first by domain (the optional `domains` column), then by name, and named after it in `registered_name`. FCRs from companies not on the list keep `registered_name` empty, rather than getting a guess.
-- **Kept for silver**: `INCLUDED_DOC_KINDS = {"fcr"}`, reporting on 2020 or later.
+- **Kept for the register**: `INCLUDED_DOC_KINDS = {"fcr"}`, reporting on 2020 or later.
 
 ## Tables and incremental runs
 
-| Table | Layer | Holds |
-|---|---|---|
-| `bronze_fcr_documents` | bronze | Every search result found, plus `first_seen_at` and `is_listed` |
-| `bronze_fcr_search_log` | bronze | One row per search made (append-only) |
-| `silver_fcr_documents` | silver | Curated FCRs, plus `processed` and `volume_path` once downloaded |
-| `silver_parsed_fcr_documents` | silver | `ai_parse_document` output per FCR, parsed once |
-| `gold_fcr_chunks` | gold | Chunking strategy 1: one chunk per element |
-| `gold_fcr_chunks_by_section` | gold | Chunking strategy 2, used for search: one chunk per section, with embeddings |
+The tables Python lands (`src/fcr_curator/tables.py`), which dbt reads as sources:
+
+| Table | Holds |
+|---|---|
+| `raw_fcr_search_results` | Every FCR PDF found by search or on a disclosures page, plus `first_seen_at` and `is_listed` |
+| `raw_fcr_search_log` | One row per search made (append-only) |
+| `raw_fcr_register` | Curated FCRs, one per company and year, plus `processed` and `volume_path` once downloaded |
+| `raw_fcr_parsed_documents` | `ai_parse_document` output per FCR, parsed once |
 
 Every table is updated with `MERGE`, never overwritten, so re-runs are safe:
 
-- **Bronze** updates a row only when its content changes or a new query finds it; a new rank alone doesn't count, since Google reorders results. A row is delisted only when every query that ever found it was asked again and none returned it.
-- **Silver** never touches `processed` or `volume_path` when re-curating, and drops rows that no longer survive curation (their files stay in the volume).
-- **Processing** parses, chunks and embeds only what's new, and deletes parsed rows and chunks of FCRs silver dropped.
+- **Search results**: a row is updated only when its content changes or a new query finds it; a new rank alone doesn't count, since Google reorders results. A row is delisted only when every query that ever found it was asked again and none returned it.
+- **The register** never touches `processed` or `volume_path` when re-curating, and drops rows that no longer survive curation (their files stay in the volume).
+- **Parsing** handles only new downloads, and deletes the parses of FCRs the register dropped.
 
 ## Findings
 
 | Run | Searches | Result |
 |---|---|---|
-| First (discovery only) | 11 of a possible 12 | 77 results from 53 domains; 37 FCRs in silver |
+| First (discovery only) | 11 of a possible 12 | 77 results from 53 domains; 37 FCRs in the register |
 | Second (targeted plus discovery) | 28 of a possible 29 | 184 results from 110 domains; **81 FCRs from 58 insurers and reinsurers**, 78 downloaded |
 
 - **Targeting works**: the 11 `site:` searches for known (re)insurers found 41 FCR-like results, nearly 4 per search.

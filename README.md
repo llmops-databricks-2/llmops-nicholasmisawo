@@ -22,23 +22,28 @@ market. It should answer questions like:
 ## How it works
 
 ```text
-SerpAPI search -> bronze -> silver (curate, download PDFs) -> parse -> chunk -> embed -> Lakebase (pgvector)
-                                                                                            |
-           question -> rewrite -> semantic + keyword search (filtered) -> rerank -> token-budgeted context
+                 Python lands the raw data                                    dbt builds the rest
+reference list -> search + disclosures pages -> curate, download -> parse  |  chunk -> embed -> knowledge base
+  (dbt seed)      raw_fcr_search_results         raw_fcr_register    raw_fcr_parsed_documents   fcr_knowledge_base
+                                                                                                      |
+                                                                                    Lakebase (pgvector) copy
+                                                                                                      |
+              question -> rewrite -> semantic + keyword search (filtered) -> rerank -> cited, token-budgeted context
 ```
 
-One weekly job runs everything up to Lakebase. Search runs on demand. The design and what we found at
-each stage are in [`docs/`](docs/README.md):
+One weekly job runs everything up to Lakebase. Search runs on demand. Every FCR is named after the
+reference list where its company is on it, and every citation opens the PDF at the cited page. The design
+and what we found at each stage are in [`docs/`](docs/README.md):
 
 | Doc | Covers |
 |---|---|
-| [01 Data pipeline](docs/01-data-pipeline.md) | Finding FCRs on a search budget, curation, tables |
-| [02 Chunking](docs/02-chunking.md) | Two chunking strategies compared, boundaries, the embedding window |
-| [03 Lakebase](docs/03-lakebase.md) | Embeddings and the synced pgvector table |
-| [04 Search](docs/04-search.md) | Filtered, keyword and hybrid search, reranking, rewriting, token budget |
-| [05 Layers and dbt](docs/05-layers.md) | Raw, bronze, silver, gold; what dbt builds; migration phases |
-| [Context engineering](docs/context-engineering.md) | Every strategy that shapes what the model sees |
-| [Environment](docs/environment.md) | Resources, model services, environments, CI |
+| [01 Environment](docs/01-environment.md) | Resources, model services, environments, CI |
+| [02 Layers and dbt](docs/02-layers-and-dbt.md) | The layers, the dbt models and where the dbt context engineering package is used |
+| [03 Data pipeline](docs/03-data-pipeline.md) | Finding FCRs on a search (Google SerpAPI) budget, curation, tables |
+| [04 Chunking](docs/04-chunking.md) | Two chunking strategies compared, boundaries, the embedding window |
+| [05 Lakebase](docs/05-lakebase.md) | Embeddings and the synced pgvector copy of the knowledge base |
+| [06 Search](docs/06-search.md) | Filtered, keyword and hybrid search, reranking, rewriting, token budget |
+| [07 Context engineering](docs/07-context-engineering.md) | Every strategy that shapes what the model sees |
 
 ## Quick start
 
@@ -60,26 +65,28 @@ Deploy and run:
 ```bash
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
-databricks bundle run fcr_pipeline -t dev --only bronze_fcr_documents --params dry_run=true   # plan and cost, no searches
+databricks bundle run fcr_pipeline -t dev --only search_fcrs --params dry_run=true            # plan and cost, no searches
 databricks bundle run fcr_pipeline -t dev                                                     # the whole pipeline
-databricks bundle run fcr_pipeline -t dev --only silver_fcr_documents+                        # everything after search
+databricks bundle run fcr_pipeline -t dev --only curate_and_download_fcrs+                    # everything after search
 ```
 
-Search the chunks from your machine:
+The job runs dbt itself. To run dbt from your machine, see [02 Layers and dbt](docs/02-layers-and-dbt.md#running-dbt).
+
+Search the knowledge base from your machine:
 
 ```bash
-env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_fcr_chunks.py
+env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_retrieval/search_knowledge_base.py
 ```
 
 ## Project layout
 
 ```text
-src/fcr_curator/     the package: search planning, curation, chunking, embeddings, Lakebase, search
+src/fcr_curator/     the package: search planning, sources, curation, parsing, chunking, gateway, Lakebase, search
 notebooks/
-  01_ingestion/      bronze (search) and silver (curate, download)
-  02_processing/     parse, chunk, embed, compare chunking strategies
-  03_retrieval/      Lakebase sync, search walkthrough, UI search queries (search_examples.sql)
-dbt/                 dbt project (own environment): seed, staging, intermediate, context, marts
+  01_ingestion/      search_fcrs (SerpAPI and pages), curate_and_download_fcrs
+  02_processing/     parse_fcr_documents (ai_parse_document)
+  03_retrieval/      sync to Lakebase, search walkthrough, UI search queries (search_examples.sql)
+dbt/                 dbt project (own environment): reference seed, staging, intermediate, context, marts
 resources/           the bundle's job definition
 tests/               unit tests, one file per module
 docs/                design and findings
