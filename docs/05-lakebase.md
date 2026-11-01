@@ -31,6 +31,19 @@ machine:
 uv run python -c "from databricks.sdk import WorkspaceClient; from fcr_curator.config import load_config; from fcr_curator.lakebase import ensure_vector_extension; ensure_vector_extension(WorkspaceClient(profile='<profile>'), load_config('project_config.yml'))"
 ```
 
+**Optional, after the first sync and again whenever the synced table is recreated**: add a full-text
+index for keyword and hybrid search. It's on `_dev` only; each environment needs its own. `LakebasePgVectorManager` (`vector_search.py`) creates it on the same
+expression `ChunkSearch.keyword()` matches against (`search.TEXT_SEARCH_VECTOR`), which Postgres needs
+in order to use it:
+
+```bash
+env -u DATABRICKS_WORKSPACE_ID uv run python -c "from databricks.sdk import WorkspaceClient; from fcr_curator.config import load_config; from fcr_curator.vector_search import LakebasePgVectorManager; LakebasePgVectorManager(load_config('project_config.yml'), 'dev', WorkspaceClient(profile='<profile>')).ensure_indexes()"
+```
+
+**Connecting from a deployed app**: `connect()` uses the project's primary compute and the current user
+by default. Set `LAKEBASE_ENDPOINT` (with `PGHOST` and `PGDATABASE` if needed) to use another compute;
+the other two are ignored without it. `DATABRICKS_CLIENT_ID`, when set, is the Postgres user.
+
 ## Checking it
 
 - **Lakebase SQL editor**: `SELECT count(*), count(embedding) FROM nicholasmisawo.fcr_knowledge_base_lakebase_dev;`
@@ -44,4 +57,6 @@ uv run python -c "from databricks.sdk import WorkspaceClient; from fcr_curator.c
 - **The first copy outlasts the job**: creating a synced table returns before the initial snapshot finishes, so the first copy took about 15 minutes after the job reported success.
 - **Needs pgvector**: without the extension the sync fails with `REQUIRED_EXTENSION_NOT_INSTALLED`, hence the one-time setup above.
 - **psycopg stays out of jobs**: loading `psycopg`'s compiled library aborts Python on serverless job compute. The sync only needs the Databricks SDK, so `lakebase.py` imports `psycopg` only inside `connect()`, which jobs never call. Anything that queries Postgres (search) runs from a laptop.
-- **No indexes**: the sync owns the table, so it has none. Exact scans are still quick: about 0.1 s filtered, 0.2 s for unfiltered vector search, and about 2.6 s for unfiltered keyword search, after the compute wakes from idle (the first query took 37 s).
+- **A synced table accepts an index**: `CREATE INDEX` worked on `fcr_knowledge_base_lakebase_dev`, which is a partitioned table with one partition. So plans show the partition's index, `partition_155655_to_tsvector_idx`, not `fcr_knowledge_base_lakebase_dev_text_gin`, the parent index that created it.
+- **The index saves the search, not the ranking**: with it, `solvency or ratio or capital or requirement` takes about 0.6 s unfiltered and 0.2 s limited to 2024. The index finds its 6,610 matches in about 1 ms; the rest goes on reading those rows and running `ts_rank_cd`, so common words stay slower than rare ones.
+- **Scans without an index**: measured before it, on other queries, so not a direct comparison. Exact scans are quick: about 0.1 s filtered, 0.2 s for unfiltered vector search, and about 2.6 s for unfiltered keyword search, after the compute wakes from idle (the first query took 37 s).

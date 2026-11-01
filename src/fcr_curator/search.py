@@ -10,13 +10,16 @@ classification (the insurer's FCR licence class) and embedding.
   terms (BSCR, ECR, a figure) that embeddings blur.
 - hybrid: both, fused with Reciprocal Rank Fusion, which needs only ranks, not comparable scores.
 
-The synced table belongs to the sync, so it has no search indexes. Exact scans over ~20k chunks take
-about 0.1s when filtered and a few seconds for an unfiltered keyword search.
+Every hit carries the score its search ranked it by. Scores compare only within one search: cosine
+similarity for semantic, ts_rank_cd for keyword, the RRF score for hybrid.
+
+The sync owns the table's rows. vector_search.py can add a GIN index on TEXT_SEARCH_VECTOR for keyword
+search; vector search scans exactly, about 0.1s filtered over ~20k chunks.
 """
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import psycopg
 from psycopg import sql
@@ -33,6 +36,9 @@ HIT_COLUMNS = sql.SQL(
 # The licence classes on the entity list (in_search_scope in dbt/seeds/bma_licence_classes.csv): the
 # values classification takes. Class 4 and 3B write general business, Long Term Class E long-term
 FCR_CLASSES = ("Class 4", "Long Term Class E", "Class 3B", "Group")
+# What keyword search matches against. The full-text index is built on this same expression, which
+# Postgres needs to use it
+TEXT_SEARCH_VECTOR = "to_tsvector('english', text)"
 
 
 @dataclass(frozen=True)
@@ -46,6 +52,7 @@ class SearchHit:
     page: int | None  # As printed in the PDF, counted from 1
     citation_url: str | None  # The FCR, opened at that page
     fcr_class: str | None = None  # The insurer's FCR licence class, e.g. "Class 4"
+    score: float | None = None  # What the search ranked it by; higher is better, comparable only within one search
 
 
 @dataclass(frozen=True)
@@ -93,7 +100,9 @@ def reciprocal_rank_fusion(rankings: list[list[SearchHit]], limit: int = DEFAULT
         for rank, hit in enumerate(ranking, start=1):
             scores[hit.id] += 1 / (RRF_K + rank)
             hits[hit.id] = hit
-    return [hits[hit_id] for hit_id in sorted(scores, key=scores.get, reverse=True)][:limit]
+    return [replace(hits[hit_id], score=scores[hit_id]) for hit_id in sorted(scores, key=scores.get, reverse=True)][
+        :limit
+    ]
 
 
 class ChunkSearch:
@@ -111,9 +120,13 @@ class ChunkSearch:
     ) -> list[SearchHit]:
         """Return the chunks whose embeddings are closest to query_vector."""
         where, params = filters.where()
-        query = sql.SQL("SELECT {columns} FROM {table} WHERE {where} ORDER BY embedding <=> %s::vector LIMIT %s")
+        query = sql.SQL(
+            "SELECT {columns}, 1 - (embedding <=> %s::vector) FROM {table}"
+            " WHERE {where} ORDER BY embedding <=> %s::vector LIMIT %s"
+        )
+        vector = str(query_vector)
         return self._hits(
-            query.format(columns=HIT_COLUMNS, table=self.table, where=where), [*params, str(query_vector), limit]
+            query.format(columns=HIT_COLUMNS, table=self.table, where=where), [vector, *params, vector, limit]
         )
 
     def keyword(
@@ -122,12 +135,12 @@ class ChunkSearch:
         """Return the chunks containing any of query_text's words, best matches first."""
         where, params = filters.where()
         query = sql.SQL(
-            "SELECT {columns} FROM {table}, websearch_to_tsquery('english', %s) AS words"
-            " WHERE {where} AND to_tsvector('english', text) @@ words"
-            " ORDER BY ts_rank_cd(to_tsvector('english', text), words) DESC LIMIT %s"
+            "SELECT {columns}, ts_rank_cd({text_vector}, words) FROM {table}, websearch_to_tsquery('english', %s) AS words"
+            " WHERE {where} AND {text_vector} @@ words"
+            " ORDER BY ts_rank_cd({text_vector}, words) DESC LIMIT %s"
         )
         return self._hits(
-            query.format(columns=HIT_COLUMNS, table=self.table, where=where),
+            query.format(columns=HIT_COLUMNS, table=self.table, where=where, text_vector=sql.SQL(TEXT_SEARCH_VECTOR)),
             [any_word_query(query_text), *params, limit],
         )
 

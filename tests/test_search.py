@@ -1,6 +1,10 @@
 """Tests for searching the synced FCR chunks: filters, keyword queries and rank fusion."""
 
-from fcr_curator.search import SearchFilters, SearchHit, any_word_query, reciprocal_rank_fusion
+from dataclasses import replace
+
+import pytest
+
+from fcr_curator.search import RRF_K, SearchFilters, SearchHit, any_word_query, reciprocal_rank_fusion
 
 
 def hit(hit_id: str) -> SearchHit:
@@ -41,6 +45,15 @@ def test_rank_fusion_puts_hits_found_by_both_searches_first() -> None:
 
     assert fused[0].id == "both"
     assert {fused_hit.id for fused_hit in fused} == {"a", "b", "both"}
+
+
+def test_rank_fusion_scores_each_hit_by_its_ranks_replacing_its_searchs_score() -> None:
+    """A hit's score is the sum of 1 / (RRF_K + rank) over the rankings it's in, not a cosine or text score."""
+    ranked_first = replace(hit("a"), score=0.87)
+
+    [fused] = reciprocal_rank_fusion([[ranked_first], [ranked_first]])
+
+    assert fused.score == pytest.approx(2 / (RRF_K + 1))
 
 
 def test_rank_fusion_returns_each_hit_once_up_to_the_limit() -> None:
