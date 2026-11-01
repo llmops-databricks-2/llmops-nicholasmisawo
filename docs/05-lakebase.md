@@ -7,6 +7,11 @@ API (`gateway.py`), 64 texts a request, and only text not embedded before. SQL `
 for this step: it reaches only Databricks-provided `system.ai` model services, not the course's
 `course_ops.gateway.embed`.
 
+The service allows each user 200,000 tokens and 60 requests a minute. A larger backlog can only finish
+across several minutes, so a batch the gateway rejects with a 429 waits 60 seconds and retries, up to five
+tries, and the job takes longer rather than failing. Vectors are saved only when the model finishes, so a
+run that still fails keeps none of that run's work.
+
 ## The synced table (`lakebase.py`)
 
 The `sync_knowledge_base_to_lakebase` task keeps a Lakebase copy of dbt's `fcr_knowledge_base`:
@@ -52,7 +57,7 @@ the other two are ignored without it. `DATABRICKS_CLIENT_ID`, when set, is the P
 
 ## Findings
 
-- **Synced in full**: `fcr_knowledge_base_lakebase_dev` holds 14,192 chunks from 44 listed insurers, the same as the Delta table, every one with a `vector(1024)` embedding and its licence class, keyed by `source_key`. Citations open the cited page (`…FCR-2024.pdf#page=15`).
+- **Synced in full**: `fcr_knowledge_base_lakebase_dev` holds 15,482 chunks from 44 listed insurers, the same as the Delta table, every one with a `vector(1024)` embedding and its licence class, keyed by `source_key`. Citations open the cited page (`…FCR-2024.pdf#page=15`).
 - **Changes reach Lakebase as changes**: filling in `classification` updated every row through the Change Data Feed without re-embedding anything, and chunks of FCRs that left the register were deleted the same way.
 - **The first copy outlasts the job**: creating a synced table returns before the initial snapshot finishes, so the first copy took about 15 minutes after the job reported success.
 - **Needs pgvector**: without the extension the sync fails with `REQUIRED_EXTENSION_NOT_INSTALLED`, hence the one-time setup above.
