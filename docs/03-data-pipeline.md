@@ -117,6 +117,7 @@ in-scope licence, so they dropped out.
 | First plan | 170 queries due: 1 `site:` query and 169 name queries; a run's 150-search budget leaves the last 20 for the next run |
 | First search of the list | 150 searches, 1,305 results, 517 FCR-like; 107 of the searches found something FCR-like |
 | After it | **86 FCRs from 45 of the 194 insurers**, one per insurer and year, 83 downloaded; 14,192 chunks from 44 insurers in the knowledge base and Lakebase, each with its licence class |
+| Latest run (2026-11-01) | 85 FCRs parsed into 15,482 chunks from 44 insurers, all embedded and in Lakebase |
 | Coverage by class | Groups 19 of 33 · Class 4 10 of 46 · Long Term E 13 of 83 · Class 3B 3 of 32 |
 | Names after the report's | Matching the title after the report's name brought back Wilton Reinsurance Bermuda's FCRs and gave Athora Life Re its own, instead of Athora Group's |
 

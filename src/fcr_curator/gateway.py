@@ -9,14 +9,20 @@ Callers take an EmbedBatch or Chat function rather than a client, so tests can p
 
 import json
 import re
+import time
 from collections.abc import Callable, Sequence
 
 from databricks.sdk import WorkspaceClient
-from openai import OpenAI
+from loguru import logger
+from openai import OpenAI, RateLimitError
 
 GATEWAY_API_PATH = "/ai-gateway/mlflow/v1"
 # Inputs per request; well under the gateway's request limits for chunk-sized texts
 EMBED_BATCH_SIZE = 64
+# The gateway's limits renew each minute, so a full minute's wait always reaches a fresh allowance. A backlog
+# over the tokens-per-minute limit (200k on course_ops.gateway.embed) can only finish by waiting
+RATE_LIMIT_WAIT_SECONDS = 60
+EMBED_ATTEMPTS = 5  # Per batch; a batch fits well within one minute's allowance, so more means something else is wrong
 
 # Long enough for a reasoning model to think before a short JSON reply
 CHAT_MAX_TOKENS = 2000
@@ -33,14 +39,30 @@ def gateway_client(workspace: WorkspaceClient) -> OpenAI:
     return OpenAI(api_key=token, base_url=f"{workspace.config.host.rstrip('/')}{GATEWAY_API_PATH}")
 
 
-def gateway_embedder(client: OpenAI, model_service: str) -> EmbedBatch:
-    """Return a function that embeds one batch of texts with the given three-part model service name."""
+def gateway_embedder(client: OpenAI, model_service: str, sleep: Callable[[float], None] = time.sleep) -> EmbedBatch:
+    """Return a function that embeds one batch of texts with the given three-part model service name.
+
+    A batch the rate limit rejects waits for the next minute's allowance, up to EMBED_ATTEMPTS tries. After
+    that the RateLimitError propagates, failing the run rather than leaving chunks without vectors.
+    """
 
     def embed(texts: list[str]) -> list[list[float]]:
-        response = client.embeddings.create(model=model_service, input=texts)
-        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+        for attempt in range(1, EMBED_ATTEMPTS):
+            try:
+                return _embed_batch(client, model_service, texts)
+            except RateLimitError:
+                logger.warning(
+                    f"Rate limited by {model_service}, attempt {attempt}; waiting {RATE_LIMIT_WAIT_SECONDS}s"
+                )
+                sleep(RATE_LIMIT_WAIT_SECONDS)
+        return _embed_batch(client, model_service, texts)
 
     return embed
+
+
+def _embed_batch(client: OpenAI, model_service: str, texts: list[str]) -> list[list[float]]:
+    response = client.embeddings.create(model=model_service, input=texts)
+    return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
 
 
 def embed_texts(texts: Sequence[str], embed_batch: EmbedBatch, batch_size: int = EMBED_BATCH_SIZE) -> list[list[float]]:
