@@ -14,6 +14,7 @@ One-time setup: the vector column needs the pgvector extension in the Lakebase d
 environment shares that database, so install it once, from your machine, with ensure_vector_extension.
 """
 
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -87,6 +88,25 @@ def synced_table_spec(config: ProjectConfig, source_table: str) -> SyncedTableSy
 # --- Postgres ---------------------------------------------------------------------------------
 
 
+def connection_settings(workspace: WorkspaceClient, config: ProjectConfig) -> dict[str, str]:
+    """Return where and how to connect: the project's primary compute, unless the environment says otherwise.
+
+    A deployed app can name its compute with LAKEBASE_ENDPOINT, plus PGHOST and PGDATABASE. They're ignored
+    without LAKEBASE_ENDPOINT, so a stray PGHOST can't pair one compute's host with another's credential.
+    DATABRICKS_CLIENT_ID is a service principal's user name.
+    """
+    endpoint = os.environ.get("LAKEBASE_ENDPOINT")
+    host = os.environ.get("PGHOST") if endpoint else None
+    database = (os.environ.get("PGDATABASE") if endpoint else None) or POSTGRES_DATABASE
+    endpoint = endpoint or endpoint_path(config)
+    return {
+        "host": host or workspace.postgres.get_endpoint(endpoint).status.hosts.host,
+        "dbname": database,
+        "user": os.environ.get("DATABRICKS_CLIENT_ID") or workspace.current_user.me().user_name,
+        "password": workspace.postgres.generate_database_credential(endpoint=endpoint).token,
+    }
+
+
 def connect(workspace: WorkspaceClient, config: ProjectConfig) -> "psycopg.Connection":
     """Open a connection to the Lakebase database as the current Databricks user or service principal.
 
@@ -96,14 +116,7 @@ def connect(workspace: WorkspaceClient, config: ProjectConfig) -> "psycopg.Conne
     # serverless job compute, and the sync itself only needs the Databricks SDK
     import psycopg
 
-    endpoint = endpoint_path(config)
-    return psycopg.connect(
-        host=workspace.postgres.get_endpoint(endpoint).status.hosts.host,
-        dbname=POSTGRES_DATABASE,
-        user=workspace.current_user.me().user_name,  # A service principal's user name is its application id
-        password=workspace.postgres.generate_database_credential(endpoint=endpoint).token,
-        sslmode="require",
-    )
+    return psycopg.connect(**connection_settings(workspace, config), sslmode="require")
 
 
 def ensure_vector_extension(workspace: WorkspaceClient, config: ProjectConfig) -> None:

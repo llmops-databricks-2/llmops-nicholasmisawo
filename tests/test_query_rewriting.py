@@ -41,6 +41,15 @@ def test_rewrite_reads_a_licence_class_the_question_limits_itself_to() -> None:
     assert rewritten.filters == SearchFilters(fcr_class="Class 4")
 
 
+def test_rewrite_drops_a_class_given_with_a_named_institution() -> None:
+    """The name already picks the company, and a wrongly guessed class would leave nothing to find."""
+    chat = replying('{"search_text": "solvency ratio", "institution": "Wilton Re", "fcr_class": "Class 4"}')
+
+    rewritten = rewrite_query("How solvent was Wilton Re?", chat, TODAY)
+
+    assert rewritten.filters == SearchFilters(institution="Wilton Re")
+
+
 def test_rewrite_drops_a_class_that_isnt_on_the_entity_list() -> None:
     """A class no chunk has would filter out everything, so it's ignored instead."""
     chat = replying('{"search_text": "catastrophe risk", "fcr_class": "Class 2"}')

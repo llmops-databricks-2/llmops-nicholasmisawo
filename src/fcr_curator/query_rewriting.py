@@ -23,7 +23,8 @@ Reply with JSON only: {{"search_text": string, "institution": string or null, "r
   {today}, so "last year" or "latest" means {last_year}.
 - fcr_class: the BMA licence class the question limits itself to, exactly one of {classes}, or null.
   "Class 4 reinsurers" is "Class 4"; "long-term insurers" or "life reinsurers" is "Long Term Class E";
-  "insurance groups" is "Group". Leave out the class from search_text."""
+  "insurance groups" is "Group". Use it only when the question states the class; never guess a company's class,
+  and use null when an institution is named. Leave out the class from search_text."""
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ def rewrite_query(question: str, chat: Chat, today: date) -> RewrittenQuery:
     """Return the question's search text and filters, as the chat model reads them.
 
     Raises ValueError when the reply has no search_text, since searching without one would be a guess. A
-    class that isn't one of FCR_CLASSES is dropped: it would filter out every chunk.
+    class that isn't one of FCR_CLASSES is dropped: it would filter out every chunk. So is a class given
+    with an institution: the name already picks the company, and the model guesses its class, sometimes
+    wrongly (Wilton Re as Class 4, when it's Long Term Class E), which leaves nothing to find.
     """
     instructions = INSTRUCTIONS.format(
         today=today.isoformat(), last_year=today.year - 1, classes=", ".join(FCR_CLASSES)
@@ -48,11 +51,12 @@ def rewrite_query(question: str, chat: Chat, today: date) -> RewrittenQuery:
     if not search_text:
         raise ValueError(f"Query rewrite returned no search_text for {question!r}: {reply}")
     year = reply.get("reporting_year")
-    fcr_class = reply.get("fcr_class") if reply.get("fcr_class") in FCR_CLASSES else None
+    institution = reply.get("institution") or None
+    fcr_class = reply.get("fcr_class") if not institution and reply.get("fcr_class") in FCR_CLASSES else None
     return RewrittenQuery(
         search_text=search_text,
         filters=SearchFilters(
-            institution=reply.get("institution") or None,
+            institution=institution,
             reporting_year=int(year) if year else None,
             fcr_class=fcr_class,
         ),

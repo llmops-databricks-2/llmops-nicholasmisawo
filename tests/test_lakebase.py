@@ -13,7 +13,13 @@ from databricks.sdk.service.postgres import (
 )
 
 from fcr_curator.config import ProjectConfig
-from fcr_curator.lakebase import endpoint_path, sync_to_lakebase, synced_table_name, synced_table_spec
+from fcr_curator.lakebase import (
+    connection_settings,
+    endpoint_path,
+    sync_to_lakebase,
+    synced_table_name,
+    synced_table_spec,
+)
 
 CONFIG = ProjectConfig.from_yaml(str(Path(__file__).resolve().parents[1] / "project_config.yml"), "dev")
 SOURCE = "llmops_dev.nicholasmisawo.fcr_knowledge_base"
@@ -125,3 +131,70 @@ def test_sync_to_lakebase_fails_when_a_refresh_fails() -> None:
 def test_endpoint_path_points_at_the_projects_primary_compute() -> None:
     """Connections go to the read-write compute on the production branch."""
     assert endpoint_path(CONFIG) == "projects/lb-llmops-nicholasmisawo/branches/production/endpoints/primary"
+
+
+def postgres_workspace(credentials: list[str]) -> SimpleNamespace:
+    """Build a workspace whose endpoints all have one host, recording which endpoint each credential was for."""
+
+    def generate_database_credential(endpoint: str) -> SimpleNamespace:
+        credentials.append(endpoint)
+        return SimpleNamespace(token="token")
+
+    def get_endpoint(name: str) -> SimpleNamespace:
+        return SimpleNamespace(status=SimpleNamespace(hosts=SimpleNamespace(host="looked-up-host")))
+
+    return SimpleNamespace(
+        postgres=SimpleNamespace(get_endpoint=get_endpoint, generate_database_credential=generate_database_credential),
+        current_user=SimpleNamespace(me=lambda: SimpleNamespace(user_name="me@example.com")),
+    )
+
+
+@pytest.fixture
+def no_connection_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    """Clear the connection variables, returning monkeypatch so a test can set the ones it's about."""
+    for name in ("LAKEBASE_ENDPOINT", "PGHOST", "PGDATABASE", "DATABRICKS_CLIENT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def test_connection_settings_default_to_the_projects_primary_compute_and_the_current_user(
+    no_connection_env: pytest.MonkeyPatch,
+) -> None:
+    """With nothing in the environment, a laptop connects to the configured project as its own user."""
+    credentials: list[str] = []
+
+    settings = connection_settings(postgres_workspace(credentials), CONFIG)
+
+    assert settings == {
+        "host": "looked-up-host",
+        "dbname": "databricks_postgres",
+        "user": "me@example.com",
+        "password": "token",
+    }
+    assert credentials == [endpoint_path(CONFIG)]
+
+
+def test_connection_settings_follow_the_environment_when_it_names_an_endpoint(
+    no_connection_env: pytest.MonkeyPatch,
+) -> None:
+    """An app's endpoint, host, database and service principal all replace the defaults."""
+    no_connection_env.setenv("LAKEBASE_ENDPOINT", "projects/app/branches/b/endpoints/e")
+    no_connection_env.setenv("PGHOST", "app-host")
+    no_connection_env.setenv("PGDATABASE", "app_db")
+    no_connection_env.setenv("DATABRICKS_CLIENT_ID", "client-id")
+    credentials: list[str] = []
+
+    settings = connection_settings(postgres_workspace(credentials), CONFIG)
+
+    assert settings == {"host": "app-host", "dbname": "app_db", "user": "client-id", "password": "token"}
+    assert credentials == ["projects/app/branches/b/endpoints/e"]
+
+
+def test_connection_settings_ignore_a_host_without_an_endpoint(no_connection_env: pytest.MonkeyPatch) -> None:
+    """A stray PGHOST mustn't pair another compute's host with this project's credential."""
+    no_connection_env.setenv("PGHOST", "stray-host")
+    no_connection_env.setenv("PGDATABASE", "stray_db")
+
+    settings = connection_settings(postgres_workspace([]), CONFIG)
+
+    assert (settings["host"], settings["dbname"]) == ("looked-up-host", "databricks_postgres")

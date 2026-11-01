@@ -51,7 +51,7 @@ def show(title: str, hits: list[SearchHit]) -> None:
     """Print the top hits of one search, one line each."""
     print(f"\n{title}")
     for rank, hit in enumerate(hits[:TOP_K], start=1):
-        print(f"  {rank}. {hit.company} {hit.reporting_year} page {hit.page} | {hit.text[:90]!r}")
+        print(f"  {rank}. [{hit.score:.3f}] {hit.company} {hit.reporting_year} page {hit.page} | {hit.text[:90]!r}")
 
 
 # COMMAND ----------
