@@ -13,3 +13,12 @@ spans them. Each stage page explains how it works, then records the findings fro
 | [05 Lakebase](05-lakebase.md) | Embeddings and the Lakebase copy of the knowledge base |
 | [06 Search](06-search.md) | Semantic, filtered, keyword and hybrid search, reranking, query rewriting, the token budget |
 | [07 Context engineering](07-context-engineering.md) | Every strategy that controls what reaches the model, and where it lives |
+
+## Submissions
+
+Dated snapshots of what was delivered for each lecture, in `submissions/`. Unlike the pages above, they
+aren't kept up to date as the project changes.
+
+| Lecture | Submission |
+|---|---|
+| 2 | [The retrieval foundation](submissions/lecture-02-retrieval-foundation.md): processed documents and chunks, chunking strategies compared, the Lakebase synced table, semantic, filtered and hybrid search |
