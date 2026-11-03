@@ -31,7 +31,7 @@ variables:
     default: nicholasmisawo
   warehouse_id:
     description: SQL warehouse the dbt tasks run on
-    default: "0e56acba898dad4a"
+    default: "86722fe1a817f6aa"
 
 # Three targets in the one course workspace, each writing your schema in its own catalog
 # (project_config.yml). Each is deployed under the home folder of whoever deploys it: you from your

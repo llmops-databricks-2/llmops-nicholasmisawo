@@ -6,7 +6,7 @@ fcr_curator:
     dev: &defaults
       type: databricks
       host: "{{ env_var('DBT_DATABRICKS_HOST', 'dbc-88df4c2c-4033.cloud.databricks.com') }}"
-      http_path: /sql/1.0/warehouses/0e56acba898dad4a
+      http_path: /sql/1.0/warehouses/86722fe1a817f6aa
       auth_type: oauth
       catalog: llmops_dev
       schema: nicholasmisawo
