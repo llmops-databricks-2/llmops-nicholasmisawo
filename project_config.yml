@@ -1,5 +1,7 @@
 # Project configuration for the LLMOps course, filled in for you at onboarding.
 # Resources are provisioned at onboarding except the volume, which you create during the course.
+# embedding_endpoint is the serving endpoint for ai_query, AI Search and DatabricksServingEndpoint;
+# embedding_service is the AI Gateway model service for the OpenAI client (README.md).
 
 # Your usage policy: set it on every serverless job, endpoint and app you create.
 usage_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
@@ -13,8 +15,9 @@ dev:
   schema: "nicholasmisawo"
   volume: "fcr_documents"
   llm_endpoint: "course_ops.gateway.chat"
-  embedding_endpoint: "course_ops.gateway.embed"
-  warehouse_id: "0e56acba898dad4a"
+  embedding_endpoint: "databricks-gte-large-en"
+  embedding_service: "course_ops.gateway.embed"
+  warehouse_id: "86722fe1a817f6aa"
   experiment_path: "/llmops/nicholasmisawo-dev"
   # Your provisioned Lakebase project.
   lakebase_instance: "lb-llmops-nicholasmisawo"
@@ -25,8 +28,9 @@ acc:
   schema: "nicholasmisawo"
   volume: "fcr_documents"
   llm_endpoint: "course_ops.gateway.chat"
-  embedding_endpoint: "course_ops.gateway.embed"
-  warehouse_id: "0e56acba898dad4a"
+  embedding_endpoint: "databricks-gte-large-en"
+  embedding_service: "course_ops.gateway.embed"
+  warehouse_id: "86722fe1a817f6aa"
   experiment_path: "/llmops/nicholasmisawo-acc"
   # Your provisioned Lakebase project for this environment.
   lakebase_instance: "lb-llmops-nicholasmisawo"
@@ -37,8 +41,9 @@ prd:
   schema: "nicholasmisawo"
   volume: "fcr_documents"
   llm_endpoint: "course_ops.gateway.chat"
-  embedding_endpoint: "course_ops.gateway.embed"
-  warehouse_id: "0e56acba898dad4a"
+  embedding_endpoint: "databricks-gte-large-en"
+  embedding_service: "course_ops.gateway.embed"
+  warehouse_id: "86722fe1a817f6aa"
   experiment_path: "/llmops/nicholasmisawo-prd"
   # Your provisioned Lakebase project for this environment.
   lakebase_instance: "lb-llmops-nicholasmisawo"

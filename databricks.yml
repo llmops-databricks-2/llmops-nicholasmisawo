@@ -31,7 +31,7 @@ variables:
     default: nicholasmisawo
   warehouse_id:
     description: SQL warehouse the dbt tasks run on
-    default: "0e56acba898dad4a"
+    default: "86722fe1a817f6aa"
 
 # Three targets in the one course workspace, each writing your schema in its own catalog
 # (project_config.yml). Each is deployed under the home folder of whoever deploys it: you from your
@@ -44,13 +44,13 @@ targets:
     default: true
     mode: development
     workspace:
-      host: https://dbc-88df4c2c-4033.cloud.databricks.com
+      host: https://dbc-e81ca4d2-f6bd.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.target}/${bundle.name}
 
   # Acceptance: deployed on every merge to main.
   acc:
     workspace:
-      host: https://dbc-88df4c2c-4033.cloud.databricks.com
+      host: https://dbc-e81ca4d2-f6bd.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.target}/${bundle.name}
     variables:
       catalog: llmops_acc
@@ -58,7 +58,7 @@ targets:
   # Production: deployed after acceptance, once you approve it.
   prd:
     workspace:
-      host: https://dbc-88df4c2c-4033.cloud.databricks.com
+      host: https://dbc-e81ca4d2-f6bd.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.target}/${bundle.name}
     variables:
       catalog: llmops_prd

@@ -15,7 +15,7 @@ def test_project_config_loads_for_dev() -> None:
     cfg = ProjectConfig.from_yaml(str(PROJECT_CONFIG), "dev")
 
     assert (cfg.full_schema_name, cfg.volume) == ("llmops_dev.nicholasmisawo", "fcr_documents")
-    assert cfg.warehouse_id == "0e56acba898dad4a"
+    assert cfg.warehouse_id == "86722fe1a817f6aa"
 
 
 def test_project_config_inherits_top_level_usage_policy() -> None:
