@@ -99,3 +99,15 @@ def test_ensure_indexes_indexes_the_expression_keyword_search_matches(connection
     created = statement.as_string(None)
     assert f"USING gin (({TEXT_SEARCH_VECTOR}))" in created
     assert '"fcr_knowledge_base_lakebase_dev_text_gin"' in created
+
+
+def test_page_reads_one_cited_pages_chunks_in_reading_order(connection: FakeConnection) -> None:
+    """A page is looked up by its exact citation URL, ordered by the chunk number in source_id."""
+    citation = "https://wiltonre.bm/fcr.pdf#page=15"
+
+    [chunk] = manager().page(citation)
+
+    [(query, params)] = connection.executed
+    assert params == [citation]
+    assert "ORDER BY (regexp_replace(source_id, '^.*_', ''))::int" in query.as_string(None)
+    assert chunk.page == 15

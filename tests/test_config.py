@@ -26,6 +26,14 @@ def test_project_config_inherits_top_level_usage_policy() -> None:
         assert cfg.usage_policy_id == "ffe08ae3-a783-3201-ab0c-2fff24538807"
 
 
+def test_project_config_names_the_gateway_service_the_openai_client_calls() -> None:
+    """The OpenAI client needs the Unity Gateway service; the serving endpoint is for SQL and AI Search."""
+    cfg = ProjectConfig.from_yaml(str(PROJECT_CONFIG), "dev")
+
+    assert cfg.embedding_service == "course_ops.gateway.embed"
+    assert cfg.embedding_endpoint == "databricks-gte-large-en"
+
+
 def test_project_config_loads_lakebase_instance() -> None:
     """Each environment names its provisioned Lakebase project."""
     cfg = ProjectConfig.from_yaml(str(PROJECT_CONFIG), "dev")
