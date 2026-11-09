@@ -37,7 +37,7 @@ class LakebasePgVectorManager:
         """Search env's synced table; embed defaults to config's embedding model service on the gateway."""
         self.config = config
         self.workspace = workspace or WorkspaceClient()
-        self.embed = embed or gateway_embedder(gateway_client(self.workspace), config.embedding_endpoint)
+        self.embed = embed or gateway_embedder(gateway_client(self.workspace), config.embedding_service)
         # Postgres drops the catalog: the table is <schema>.<table>
         self.table = synced_table_name(config, env).split(".", 1)[1]
 
@@ -71,7 +71,7 @@ class LakebasePgVectorManager:
         """Embed query with the model that embedded the chunks, so their vectors are comparable."""
         [vector] = self.embed([query])
         if not vector:
-            raise ValueError(f"The embedding model service {self.config.embedding_endpoint} returned no vector")
+            raise ValueError(f"The embedding model service {self.config.embedding_service} returned no vector")
         return vector
 
     def search(self, query: str, filters: SearchFilters = NO_FILTERS, limit: int = DEFAULT_LIMIT) -> list[SearchHit]:
