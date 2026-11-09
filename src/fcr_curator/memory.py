@@ -1,139 +1,67 @@
-"""Persist an agent session's messages in Lakebase (Postgres), so a conversation survives restarts."""
+"""Keep each agent session's messages in Lakebase, so the next turn, or a restarted process, continues it.
 
-import json
-import os
-import urllib.parse
+One row per message in <schema>.agent_session_messages_<env>, next to the knowledge base's synced
+table. Every environment shares one Lakebase database, so the environment is in the name, as it is for
+the synced table.
+
+- Messages come back ordered by id, not created_at: CURRENT_TIMESTAMP is the transaction's start time,
+  so messages saved together share one and could come back in any order.
+- Each call opens its own connection (lakebase.connect), so its OAuth token is always fresh; a pool
+  would keep using connections whose token expires after about an hour.
+- Errors propagate: a turn that can't load or save its history fails, rather than continuing without it.
+"""
+
 from typing import Any
 
-import psycopg
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.postgres import PostgresAPI
 from loguru import logger
-from psycopg_pool import ConnectionPool
+from psycopg import sql
+from psycopg.types.json import Jsonb
+
+from fcr_curator.config import ProjectConfig
+from fcr_curator.lakebase import connect
+
+SESSION_TABLE = "agent_session_messages"
 
 
 class LakebaseMemory:
-    """Handles session message persistence using Lakebase (PostgreSQL)."""
+    """Saves and loads a session's messages in the environment's Lakebase session table."""
 
-    def __init__(
-        self,
-        project_id: str,
-        workspace: WorkspaceClient | None = None,
-        database_user: str | None = None,
-    ) -> None:
-        self.project_id = project_id
+    def __init__(self, workspace: WorkspaceClient, config: ProjectConfig, env: str = "dev") -> None:
+        """Keep env's sessions in <schema>.agent_session_messages_<env>."""
         self.workspace = workspace
-        self.database_user = database_user
-        self._pool: ConnectionPool | None = None
-
-    def _get_connection_string(self) -> str:
-        """Build connection string for Lakebase.
-
-        Supports two authentication modes:
-        - SPN (production): Needs LAKEBASE_SP_CLIENT_ID, LAKEBASE_SP_CLIENT_SECRET, LAKEBASE_SP_HOST
-        - User (local testing): Uses default WorkspaceClient auth
-        """
-        # Use dedicated Lakebase SPN env vars to avoid overriding
-        # the default WorkspaceClient auth used by MCP tools
-        client_id = os.environ.get("LAKEBASE_SP_CLIENT_ID") or os.environ.get("DATABRICKS_CLIENT_ID")
-        client_secret = os.environ.get("LAKEBASE_SP_CLIENT_SECRET") or os.environ.get("DATABRICKS_CLIENT_SECRET")
-        host = os.environ.get("LAKEBASE_SP_HOST") or os.environ.get("DATABRICKS_HOST")
-
-        if client_id and client_secret and host:
-            w = WorkspaceClient(
-                host=host,
-                client_id=client_id,
-                client_secret=client_secret,
-            )
-        else:
-            w = self.workspace or WorkspaceClient()
-
-        pg_api = PostgresAPI(w.api_client)
-
-        # Determine username based on auth type
-        username = client_id or self.database_user or w.current_user.me().user_name
-        username = urllib.parse.quote(username, safe="")
-
-        # Apps expose the selected Lakebase endpoint and host as resources.
-        endpoint_name = os.environ.get("LAKEBASE_ENDPOINT")
-        if endpoint_name:
-            host = os.environ.get("PGHOST")
-            database = os.environ.get("PGDATABASE", "databricks_postgres")
-        else:
-            project_parent = f"projects/{self.project_id}"
-            default_branch = next(iter(pg_api.list_branches(parent=project_parent)))
-            endpoint = next(iter(pg_api.list_endpoints(parent=default_branch.name)))
-            endpoint_name = endpoint.name
-            host = endpoint.status.hosts.host
-            database = "databricks_postgres"
-        pg_credential = pg_api.generate_database_credential(endpoint=endpoint_name)
-
-        return f"postgresql://{username}:{pg_credential.token}@{host}:5432/{database}?sslmode=require"
+        self.config = config
+        self.table_name = f"{SESSION_TABLE}_{env}"
+        self.table = sql.Identifier(config.schema, self.table_name)
 
     def ensure_schema(self) -> None:
-        """Create the session table and index if they do not exist."""
-        with self._get_pool().connection() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS session_messages (
-                    id SERIAL PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    message_data JSONB NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_session_messages_session_id
-                ON session_messages(session_id)
-                """
-            )
+        """Create the session table and its index if they're missing; does nothing if they exist."""
+        statements = [
+            sql.SQL("CREATE SCHEMA IF NOT EXISTS {schema}").format(schema=sql.Identifier(self.config.schema)),
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {table} (id BIGSERIAL PRIMARY KEY, session_id TEXT NOT NULL,"
+                " message_data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            ).format(table=self.table),
+            sql.SQL("CREATE INDEX IF NOT EXISTS {index} ON {table} (session_id, id)").format(
+                index=sql.Identifier(f"{self.table_name}_session"), table=self.table
+            ),
+        ]
+        with connect(self.workspace, self.config) as connection:
+            for statement in statements:
+                connection.execute(statement)
+        logger.info(f"Session table {self.config.schema}.{self.table_name} ready")
 
-    def _get_pool(self) -> ConnectionPool:
-        """Get or create connection pool."""
-        if self._pool is None:
-            conn_string = self._get_connection_string()
-            self._pool = ConnectionPool(conninfo=conn_string, min_size=1, max_size=5)
-        return self._pool
-
-    def _reset_pool(self) -> None:
-        """Reset pool to force new credentials on next use."""
-        if self._pool is not None:
-            self._pool.close()
-            self._pool = None
-
-    def load_messages(self, session_id: str) -> list[dict[str, Any]]:
-        """Load previous messages for a session."""
-        try:
-            with self._get_pool().connection() as conn:
-                result = conn.execute(
-                    """
-                    SELECT message_data FROM session_messages
-                    WHERE session_id = %s
-                    ORDER BY created_at ASC
-                    """,
-                    (session_id,),
-                ).fetchall()
-                return [row[0] for row in result]
-        except psycopg.OperationalError:
-            self._reset_pool()
-            raise
-        except Exception as e:
-            logger.warning(f"Failed to load session messages: {e}")
-            return []
+    def load_messages(self, session_id: str, limit: int) -> list[dict[str, Any]]:
+        """Return the session's last `limit` messages, oldest first; [] for a new session."""
+        query = sql.SQL(
+            "SELECT message_data FROM (SELECT id, message_data FROM {table} WHERE session_id = %s"
+            " ORDER BY id DESC LIMIT %s) AS recent ORDER BY id"
+        ).format(table=self.table)
+        with connect(self.workspace, self.config) as connection:
+            return [row[0] for row in connection.execute(query, [session_id, limit]).fetchall()]
 
     def save_messages(self, session_id: str, messages: list[dict[str, Any]]) -> None:
-        """Append messages to a session."""
-        try:
-            with self._get_pool().connection() as conn:
-                for msg in messages:
-                    conn.execute(
-                        "INSERT INTO session_messages (session_id, message_data) VALUES (%s, %s)",
-                        (session_id, json.dumps(msg)),
-                    )
-        except psycopg.OperationalError:
-            self._reset_pool()
-            raise
-        except Exception as e:
-            logger.warning(f"Failed to save session messages: {e}")
+        """Append messages to the session, in order, in one transaction."""
+        insert = sql.SQL("INSERT INTO {table} (session_id, message_data) VALUES (%s, %s)").format(table=self.table)
+        with connect(self.workspace, self.config) as connection, connection.cursor() as cursor:
+            cursor.executemany(insert, [(session_id, Jsonb(message)) for message in messages])
