@@ -20,7 +20,6 @@ dependencies = [
     "psycopg==3.3.2",
     "psycopg[binary]==3.3.2",
     "requests>=2.32,<3",
-    "psycopg-pool==3.2.6",
 ]
 
 [project.optional-dependencies]
@@ -71,7 +70,8 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Databricks notebooks: exploratory cells, not a public API
-"notebooks/**" = ["D100", "ANN", "ERA001"]
+# E402: a cell may set up the environment (PSYCOPG_IMPL) before the imports that depend on it
+"notebooks/**" = ["D100", "ANN", "ERA001", "E402"]
 
 [tool.ruff.format]
 indent-style = "space"
