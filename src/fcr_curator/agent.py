@@ -36,6 +36,8 @@ TOOL_GUIDANCE = """HOW TO USE THE TOOLS
   stated, work it out (eligible capital / ECR) and say that you did.
 - After a search, read the most relevant page in full with extract_fcr_content before searching again.
   Don't repeat a search with only reworded queries.
+- For counts and lists across insurers, ask the Genie tool (query_space_...) a plain-English question,
+  not SQL: Genie knows the tables and writes the SQL itself.
 - Cite every figure with the insurer, reporting year, page and citation_url."""
 # Sent when the tool rounds run out, so the turn ends with what was found rather than nothing
 ANSWER_NOW = "You have used all your tool calls. Answer now from what the tools returned, and say plainly what you couldn't find."
