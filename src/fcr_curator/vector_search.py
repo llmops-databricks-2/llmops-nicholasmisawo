@@ -11,7 +11,8 @@ tool, a notebook) needs only a question and, optionally, filters:
 It also sets up the synced table for search: pgvector (ensure_extension) and a full-text index
 (ensure_indexes). The sync owns the table's rows; the index is the only thing added to it.
 
-Run it from your machine, not a job: psycopg's compiled library aborts Python on serverless job compute.
+It loads psycopg. On Databricks, set PSYCOPG_IMPL=python before importing it (notebooks/03_agent do), since
+psycopg's binary build aborts Python on serverless compute; its pure-Python build works there.
 """
 
 from databricks.sdk import WorkspaceClient
@@ -79,6 +80,11 @@ class LakebasePgVectorManager:
         query_vector = self.embed_query(query)
         with connect(self.workspace, self.config) as connection:
             return ChunkSearch(connection, self.table).semantic(query_vector, filters, limit)
+
+    def page(self, citation_url: str) -> list[SearchHit]:
+        """Return the chunks of one cited FCR page, in reading order; [] if the page isn't in the knowledge base."""
+        with connect(self.workspace, self.config) as connection:
+            return ChunkSearch(connection, self.table).page(citation_url)
 
     def hybrid_search(
         self, query: str, filters: SearchFilters = NO_FILTERS, limit: int = DEFAULT_LIMIT

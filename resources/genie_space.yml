@@ -1,0 +1,94 @@
+# Genie space over the FCR register and the entity list, for counting and listing questions in plain
+# English ("Which Class 4 insurers have no FCR yet?"). The agent reaches it through its managed MCP server
+# (/api/2.0/mcp/genie/<space id>); the fcr_agent job passes the deployed space's id to its genie_space task.
+#
+# Genie validates the space strictly: every id is 32 lowercase hex characters, id-keyed lists are sorted
+# by id, tables by identifier, and column_configs by column_name.
+
+resources:
+  genie_spaces:
+    fcr-curator-space:
+      title: fcr-curator-space
+      description: >-
+        Ask about the Financial Condition Reports (FCRs) of BMA-licensed Bermuda insurers and reinsurers:
+        which insurers are listed, which FCRs were found for which years, and coverage by licence class.
+      warehouse_id: "${var.warehouse_id}"
+      serialized_space:
+        version: 2
+        config:
+          sample_questions:
+            - id: "10000000000000000000000000000001"
+              question: ["Which Class 4 insurers have an FCR for 2024?"]
+            - id: "10000000000000000000000000000002"
+              question: ["How many listed insurers have no FCR yet, by licence class?"]
+            - id: "10000000000000000000000000000003"
+              question: ["List Wilton Re's FCRs with their links"]
+        data_sources:
+          tables:
+            - identifier: "${var.catalog}.${var.schema}.dim_fcr_entities"
+              column_configs:
+                - column_name: business
+                  description: ["Line of business implied by the licence class: general, long_term or group."]
+                - column_name: fcr_class
+                  description: ["BMA licence class: Class 4, Long Term Class E, Class 3B or Group."]
+                  synonyms: ["licence class", "license class", "class"]
+                - column_name: fcrs_downloaded
+                  description: ["Number of this insurer's FCRs downloaded and searchable."]
+                - column_name: fcrs_found
+                  description: ["Number of this insurer's FCRs in the register."]
+                - column_name: group_assets_bn_usd
+                  description: ["Group total assets in billions of US dollars, where known."]
+                - column_name: has_fcr
+                  description: ["True if at least one FCR was found for this insurer."]
+                - column_name: latest_reporting_year
+                  description: ["Most recent reporting year with an FCR."]
+                - column_name: name
+                  description: ["Registered name of the insurer, reinsurer or group on the BMA register."]
+                  synonyms: ["insurer", "reinsurer", "company"]
+                  enable_entity_matching: true
+            - identifier: "${var.catalog}.${var.schema}.fcr_register"
+              column_configs:
+                - column_name: domain
+                  description: ["Website domain the FCR was published on, e.g. wiltonre.bm."]
+                - column_name: downloaded_at
+                  description: ["When the PDF was downloaded; empty if it hasn't been."]
+                  enable_format_assistance: true
+                - column_name: file_url
+                  description: ["Link to the FCR PDF."]
+                  synonyms: ["link", "url", "pdf"]
+                - column_name: registered_name
+                  description: ["Registered name of the insurer; joins dim_fcr_entities.name."]
+                  synonyms: ["insurer", "reinsurer", "company"]
+                  enable_entity_matching: true
+                - column_name: reporting_year
+                  description: ["The year the FCR reports on (its financial year end)."]
+                  synonyms: ["year"]
+                - column_name: search_queries
+                  exclude: true
+                - column_name: superseded_ids
+                  exclude: true
+                - column_name: volume_path
+                  exclude: true
+        instructions:
+          text_instructions:
+            - id: "30000000000000000000000000000001"
+              content:
+                - "fcr_register has one row per insurer and reporting year: the curated FCR for that year."
+                - "dim_fcr_entities has one row per insurer on the BMA entity list, with its FCR coverage."
+                - "Join them on fcr_register.registered_name = dim_fcr_entities.name."
+                - "Match insurer names loosely: 'Wilton Re' is 'Wilton Reinsurance Bermuda Limited'."
+                - "When listing FCRs, show registered_name, reporting_year and file_url."
+          example_question_sqls:
+            - id: "20000000000000000000000000000001"
+              question: ["Which Class 4 insurers have an FCR for 2024?"]
+              sql:
+                - "SELECT r.registered_name, r.reporting_year, r.file_url "
+                - "FROM ${var.catalog}.${var.schema}.fcr_register r "
+                - "JOIN ${var.catalog}.${var.schema}.dim_fcr_entities e ON e.name = r.registered_name "
+                - "WHERE e.fcr_class = 'Class 4' AND r.reporting_year = 2024 ORDER BY r.registered_name"
+            - id: "20000000000000000000000000000002"
+              question: ["How many listed insurers have no FCR yet, by licence class?"]
+              sql:
+                - "SELECT fcr_class, count(*) AS insurers_without_fcr "
+                - "FROM ${var.catalog}.${var.schema}.dim_fcr_entities "
+                - "WHERE NOT has_fcr GROUP BY fcr_class ORDER BY insurers_without_fcr DESC"

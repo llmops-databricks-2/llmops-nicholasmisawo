@@ -39,6 +39,8 @@ FCR_CLASSES = ("Class 4", "Long Term Class E", "Class 3B", "Group")
 # What keyword search matches against. The full-text index is built on this same expression, which
 # Postgres needs to use it
 TEXT_SEARCH_VECTOR = "to_tsvector('english', text)"
+# A chunk's number within its FCR is the trailing _<n> of source_id; ordering by it restores reading order
+CHUNK_ORDER = sql.SQL("(regexp_replace(source_id, '^.*_', ''))::int")
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,11 @@ class ChunkSearch:
             query.format(columns=HIT_COLUMNS, table=self.table, where=where, text_vector=sql.SQL(TEXT_SEARCH_VECTOR)),
             [any_word_query(query_text), *params, limit],
         )
+
+    def page(self, citation_url: str) -> list[SearchHit]:
+        """Return the chunks of one cited FCR page (its citation_url, ending #page=N), in reading order."""
+        query = sql.SQL("SELECT {columns} FROM {table} WHERE citation_url = %s ORDER BY {order}")
+        return self._hits(query.format(columns=HIT_COLUMNS, table=self.table, order=CHUNK_ORDER), [citation_url])
 
     def hybrid(
         self,
