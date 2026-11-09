@@ -22,12 +22,12 @@ sequenceDiagram
             Model-->>Agent: the tools it chose, with arguments
             alt which reports exist
                 rect rgba(27, 169, 255, 0.15)
-                    Agent->>Details: insurer
+                    Agent->>Details: (re)insurer
                     Details-->>Agent: FCRs by year, licence class, PDF link
                 end
             else find passages
                 rect rgba(130, 80, 223, 0.15)
-                    Agent->>Search: query + insurer, year, class filters
+                    Agent->>Search: query + (re)insurer, year, class filters
                     Search-->>Agent: passages with file_url, page, citation_url
                 end
             else read a page

@@ -14,8 +14,8 @@ which also draws one turn as a sequence diagram.
 
 ## 1. Tools
 
-The arXiv course's paper tools (`search_papers`, `get_paper_details`, `extract_paper_content`) map onto
-FCRs, and each technique the course covers is used once, where it fits:
+The FCR tools (`search_fcr`, `get_fcr_details`, `extract_fcr_content`) map onto each technique the
+course covers, where it fits:
 
 | Tool | Technique | Answers |
 |---|---|---|
@@ -68,6 +68,13 @@ gets a fresh OAuth token, and failures are raised rather than logged and skipped
 Both questions ran through `notebooks/03_agent/fcr_agent.py` with all five tools and Lakebase memory: the
 session (`demo-8032869e-…`) holds both exchanges, and the follow-up was answered from it.
 
+Genie was tested through the agent too, in a separate session:
+
+| Genie question | Result |
+|---|---|
+| *How many listed insurers have no FCR yet, by licence class?* | Genie chosen unprompted: 70 Long Term Class E, 36 Class 4, 29 Class 3B, 14 Groups, matching direct SQL |
+| *And how many Class 4 insurers do have an FCR for 2024?* | 6, matching direct SQL, in one plain-English Genie call (7 calls before the model was told not to send Genie SQL) |
+
 ## What the build found
 
 - **Two platform constraints**: psycopg's binary build aborts Python on serverless compute, so the job's
@@ -76,6 +83,8 @@ session (`demo-8032869e-…`) holds both exchanges, and the follow-up was answer
 - **The model needed domain guidance**: asked about *solvency*, it searched repeatedly for a ratio the FCR
   doesn't print, until it ran out of rounds. Telling it that FCRs give eligible capital and the ECR, and
   ending every turn with an answer, fixed it.
+- **Genie needs plain English**: the model first sent Genie SQL against tables it invented; told to ask
+  in plain English, it needed one call instead of seven.
 - **Still open**: answers don't always include the citation URL (the latest run did, earlier ones
-  didn't); "US$ million" hasn't been checked against the PDFs; and the agent hasn't yet been seen
-  choosing Genie.
+  didn't); "US$ million" hasn't been checked against the PDFs; and the agent says insurers haven't
+  *filed* an FCR when the register only knows none was *found*.

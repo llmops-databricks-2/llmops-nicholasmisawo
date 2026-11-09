@@ -70,12 +70,12 @@ sequenceDiagram
             Model-->>Agent: the tools it chose, with arguments
             alt which reports exist
                 rect rgba(27, 169, 255, 0.15)
-                    Agent->>Details: insurer
+                    Agent->>Details: (re)insurer
                     Details-->>Agent: FCRs by year, licence class, PDF link
                 end
             else find passages
                 rect rgba(130, 80, 223, 0.15)
-                    Agent->>Search: query + insurer, year, class filters
+                    Agent->>Search: query + (re)insurer, year, class filters
                     Search-->>Agent: passages with file_url, page, citation_url
                 end
             else read a page
@@ -175,5 +175,12 @@ The agent itself runs from a laptop (`notebooks/03_agent/fcr_agent.py`). `genie_
 - **Citations aren't consistent yet**: before `TOOL_GUIDANCE`, answers cited pages in a tool-style form
   (`【extract_fcr_content†page=15】`) without the URL; the latest run included the URL, but one run
   isn't enough to call it fixed.
+- **Genie, chosen unprompted, but asked in SQL**: asked how many listed insurers have no FCR yet, by
+  licence class, and then how many Class 4 insurers have a 2024 FCR, the agent chose Genie both times
+  and answered correctly (70, 36, 29 and 14; then 6, matching direct SQL). But for the second it sent
+  Genie SQL against invented tables, then `SHOW TABLES` and schema queries: 7 calls. One line of
+  `TOOL_GUIDANCE`, to ask Genie in plain English, brought it to 1.
+- **Found isn't filed**: the agent described insurers with no FCR in the register as not having *filed*
+  one; the register only knows the pipeline hasn't *found* one.
 - **Not yet verified**: answers label the figures "US$ million", which hasn't been checked against the
-  PDFs; and the demo's questions don't need Genie, so the agent hasn't yet been seen choosing it.
+  PDFs.

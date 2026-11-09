@@ -1,6 +1,6 @@
 # Docs
 
-How the FCR Curator works and what we found building it, in reading order: the setup, the map of the
+How the Financial Condition Report (FCR) Curator works, in reading order: the setup, the map of the
 layers, each pipeline stage from finding FCRs to answering questions, then the context engineering that
 spans them. Each stage page explains how it works, then records the findings from running it on real FCRs.
 
@@ -17,8 +17,7 @@ spans them. Each stage page explains how it works, then records the findings fro
 
 ## Submissions
 
-Dated snapshots of what was delivered for each lecture, in `submissions/`. Unlike the pages above, they
-aren't kept up to date as the project changes.
+Dated snapshots of what was delivered for each lecture, in `submissions/`.
 
 | Lecture | Submission |
 |---|---|
