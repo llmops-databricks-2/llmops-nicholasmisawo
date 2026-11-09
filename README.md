@@ -49,6 +49,7 @@ and every citation opens the PDF at the cited page. The design, and what we foun
 | [05 Lakebase](docs/05-lakebase.md) | Embeddings and the synced pgvector copy of the knowledge base |
 | [06 Search](docs/06-search.md) | Filtered, keyword and hybrid search, reranking, rewriting, token budget |
 | [07 Context engineering](docs/07-context-engineering.md) | Every strategy that shapes what the model sees |
+| [08 Agent](docs/08-agent.md) | The agent's tools, orchestration and session memory in Lakebase |
 
 ## Quick start
 
@@ -83,15 +84,24 @@ Search the knowledge base from your machine:
 env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/02_retrieval/search_knowledge_base.py
 ```
 
+Set up the agent's tools and session table (the `fcr_agent` job), then talk to it from your machine. How
+one turn works is drawn in [08 Agent](docs/08-agent.md#orchestration):
+
+```bash
+databricks bundle run fcr_agent -t dev
+env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_agent/fcr_agent.py
+```
+
 ## Project layout
 
 ```text
-src/fcr_curator/     the package: search planning, sources, curation, downloads, chunking, gateway, Lakebase, search
+src/fcr_curator/     the package: search planning, sources, curation, downloads, chunking, gateway, Lakebase, search, agent
 notebooks/
   01_ingestion/      search_fcrs (SerpAPI and pages), download_fcrs
   02_retrieval/      sync to Lakebase, search walkthrough, UI search queries (search_examples.sql)
+  03_agent/          the agent's setup checks (UC function, Genie, tools, memory) and the agent itself
 dbt/                 dbt project (own environment): BMA seeds, search plan, curation, parsing, chunking, embeddings
-resources/           the bundle's job definition
+resources/           the bundle's jobs and Genie space
 tests/               unit tests, one file per module
 docs/                design and findings
 databricks.yml       bundle targets dev, acc and prd

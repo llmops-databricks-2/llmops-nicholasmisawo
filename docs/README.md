@@ -13,6 +13,7 @@ spans them. Each stage page explains how it works, then records the findings fro
 | [05 Lakebase](05-lakebase.md) | Embeddings and the Lakebase copy of the knowledge base |
 | [06 Search](06-search.md) | Semantic, filtered, keyword and hybrid search, reranking, query rewriting, the token budget |
 | [07 Context engineering](07-context-engineering.md) | Every strategy that controls what reaches the model, and where it lives |
+| [08 Agent](08-agent.md) | The agent's tools, orchestration (a Mermaid sequence diagram) and session memory |
 
 ## Submissions
 
@@ -22,3 +23,4 @@ aren't kept up to date as the project changes.
 | Lecture | Submission |
 |---|---|
 | 2 | [The retrieval foundation](submissions/lecture-02-retrieval-foundation.md): processed documents and chunks, chunking strategies compared, the Lakebase synced table, semantic, filtered and hybrid search |
+| 3 | [An agent with tools and memory](submissions/lecture-03-agent.md): three tools (Lakebase pgvector, a UC function through MCP, a custom function) plus Genie, the orchestration diagram, session memory in Lakebase |
