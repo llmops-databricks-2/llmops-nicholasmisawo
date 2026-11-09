@@ -20,6 +20,7 @@ dependencies = [
     "psycopg==3.3.2",
     "psycopg[binary]==3.3.2",
     "requests>=2.32,<3",
+    "psycopg-pool==3.2.6",
 ]
 
 [project.optional-dependencies]
