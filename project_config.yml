@@ -21,6 +21,8 @@ dev:
   experiment_path: "/llmops/nicholasmisawo-dev"
   # Your provisioned Lakebase project.
   lakebase_instance: "lb-llmops-nicholasmisawo"
+  # The bundle's Genie space (resources/genie_space.yml), from `databricks bundle summary -t dev`
+  genie_space_id: "01f1dc2b34f8135ab687510c5196d913"
 
 # Acceptance: your schema in the acceptance catalog, written by your deploys; you read it.
 acc:
