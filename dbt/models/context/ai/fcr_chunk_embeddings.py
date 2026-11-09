@@ -26,10 +26,10 @@ def model(dbt: object, session: SparkSession) -> DataFrame:
         chunks = chunks.join(embedded, ["id", "content_hash"], "left_anti")
     missing = chunks.collect()
 
-    endpoint = dbt.config.get("embedding_endpoint")
-    if not endpoint:
-        raise ValueError("fcr_chunk_embeddings: set the embedding_endpoint config (dbt var embedding_endpoint)")
-    embed = gateway_embedder(gateway_client(WorkspaceClient()), endpoint)
+    service = dbt.config.get("embedding_service")
+    if not service:
+        raise ValueError("fcr_chunk_embeddings: set the embedding_service config (dbt var embedding_service)")
+    embed = gateway_embedder(gateway_client(WorkspaceClient()), service)
     vectors = embed_texts([row.chunk_text for row in missing], embed) if missing else []
     return session.createDataFrame(
         [(row.id, row.content_hash, vector) for row, vector in zip(missing, vectors, strict=True)], EMBEDDING_SCHEMA
