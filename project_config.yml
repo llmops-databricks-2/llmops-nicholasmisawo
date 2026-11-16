@@ -6,6 +6,9 @@
 # Your usage policy: set it on every serverless job, endpoint and app you create.
 usage_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
 
+# The agent's system prompt, tool guidance included, shared by every environment.
+system_prompt_file: prompts/fcr_curator.txt
+
 # Lakebase projects may be shared across environments; Unity Catalog
 # schemas remain separate. Your cohort provisions the Lakebase values below.
 

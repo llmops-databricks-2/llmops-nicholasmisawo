@@ -39,3 +39,13 @@ def test_project_config_loads_lakebase_instance() -> None:
     cfg = ProjectConfig.from_yaml(str(PROJECT_CONFIG), "dev")
 
     assert cfg.lakebase_instance == "lb-llmops-nicholasmisawo"
+
+
+def test_project_config_reads_the_system_prompt_and_tool_guidance_from_the_prompts_folder() -> None:
+    """Every environment gets the prompt in system_prompt_file, tool guidance included."""
+    prompt = (PROJECT_CONFIG.parent / "prompts/fcr_curator.txt").read_text(encoding="utf-8").strip()
+    for env in ("dev", "acc", "prd"):
+        cfg = ProjectConfig.from_yaml(str(PROJECT_CONFIG), env)
+
+        assert cfg.system_prompt == prompt
+        assert "HOW TO USE THE TOOLS" in cfg.system_prompt

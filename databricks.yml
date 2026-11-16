@@ -14,6 +14,12 @@ artifacts:
 include:
   - resources/*.yml
 
+# Files the notebooks read at run time, synced with the bundle (prompts/ as in the course)
+sync:
+  include:
+    - project_config.yml
+    - prompts/*.txt
+
 # Set once here and referenced by every job, so the policy id isn't repeated per resource
 variables:
   usage_policy_id:

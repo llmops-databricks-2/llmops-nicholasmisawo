@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from fcr_curator.agent import HISTORY_MESSAGES, MAX_TOOL_ROUNDS, NO_ANSWER, TOOL_GUIDANCE, FCRAgent
+from fcr_curator.agent import HISTORY_MESSAGES, MAX_TOOL_ROUNDS, NO_ANSWER, FCRAgent
 from fcr_curator.agent_tools import ToolInputError
 from fcr_curator.mcp import ToolInfo
 
@@ -111,13 +111,13 @@ def test_answer_falls_back_to_a_fixed_reply_when_even_the_final_request_is_empty
     assert agent(client).answer("Loop forever", SESSION) == NO_ANSWER
 
 
-def test_answer_adds_the_tool_guidance_to_the_system_prompt() -> None:
-    """The model is told how FCRs report solvency and how to use the tools, after the project's prompt."""
-    client = FakeClient(reply("An answer."))
+def test_answer_sends_the_system_prompt_first_unchanged() -> None:
+    """The configured system prompt, which carries the tool guidance, opens every request as it is."""
+    client = FakeClient(reply("The BSCR is 245%."))
 
     agent(client).answer("What is the BSCR?", SESSION)
 
-    assert client.requests[0][0]["content"] == f"You answer FCR questions.\n\n{TOOL_GUIDANCE}"
+    assert client.requests[0][0] == {"role": "system", "content": "You answer FCR questions."}
 
 
 def test_run_tool_returns_a_bad_argument_as_an_error_for_the_model() -> None:
