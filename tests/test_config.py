@@ -4,11 +4,12 @@
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
-from fcr_curator.config import AgentSettings, ProjectConfig
+from fcr_curator.config import AgentSettings, ProjectConfig, get_widget
 
 PROJECT_CONFIG = Path(__file__).resolve().parents[1] / "project_config.yml"
 
@@ -74,3 +75,27 @@ def test_agent_settings_refuse_a_default_search_count_above_the_maximum() -> Non
             excerpt_chars=800,
             max_page_chars=12000,
         )
+
+
+def test_project_config_leaves_the_genie_space_to_the_job() -> None:
+    """Each target deploys its own Genie space, so its id comes from the job, not the config."""
+    assert "genie_space_id" not in PROJECT_CONFIG.read_text()
+
+
+def widgets(values: dict[str, str]) -> SimpleNamespace:
+    """Build dbutils with widgets holding values, raising KeyError for any other, as dbutils does locally."""
+    return SimpleNamespace(widgets=SimpleNamespace(get=lambda name: values[name]))
+
+
+def test_get_widget_returns_the_widget_or_job_parameter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A widget's value wins over the default, without surrounding spaces."""
+    monkeypatch.setattr("databricks.sdk.runtime.dbutils", widgets({"env": " acc "}))
+
+    assert get_widget("env", "dev") == "acc"
+
+
+def test_get_widget_falls_back_to_the_default_when_missing_or_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No widget, as on a laptop, or an empty one gives the default."""
+    monkeypatch.setattr("databricks.sdk.runtime.dbutils", widgets({"genie_space_id": ""}))
+
+    assert (get_widget("env", "dev"), get_widget("genie_space_id", "dev-space")) == ("dev", "dev-space")

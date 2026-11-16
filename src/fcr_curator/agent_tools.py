@@ -254,8 +254,10 @@ def get_fcr_details_tool(call_uc_function: Callable[..., str]) -> ToolInfo:
     return ToolInfo(name=GET_FCR_DETAILS, spec=GET_FCR_DETAILS_SPEC, exec_fn=get_fcr_details)
 
 
-def build_fcr_tools(workspace: WorkspaceClient, config: ProjectConfig, env: str) -> list[ToolInfo]:
-    """Return the agent's tools for env; Genie's only when config names a Genie space.
+def build_fcr_tools(
+    workspace: WorkspaceClient, config: ProjectConfig, env: str, genie_space_id: str | None = None
+) -> list[ToolInfo]:
+    """Return the agent's tools for env, with the Genie space's tools when genie_space_id is given.
 
     Raises RuntimeError if the get_fcr_details UC function isn't registered (uc_functions.py).
     """
@@ -269,6 +271,6 @@ def build_fcr_tools(workspace: WorkspaceClient, config: ProjectConfig, env: str)
         get_fcr_details_tool(uc_tools[0].exec_fn),
         extract_fcr_content_tool(store, config.agent),
     ]
-    if config.genie_space_id:
-        tools.extend(mcp_server_tools(workspace, genie_mcp_url(host, config.genie_space_id)))
+    if genie_space_id:
+        tools.extend(mcp_server_tools(workspace, genie_mcp_url(host, genie_space_id)))
     return tools

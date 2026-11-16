@@ -43,7 +43,6 @@ class ProjectConfig(BaseModel):
     experiment_path: str = Field(..., description="MLflow experiment path for this environment")
     warehouse_id: str = Field(..., description="Warehouse ID")
     lakebase_instance: str = Field(..., description="Lakebase project ID")
-    genie_space_id: str | None = Field(None, description="Genie space ID for MCP integration")
 
     serpapi_secret_scope: str = Field("fcr_curator", description="Databricks secret scope holding the SerpAPI key")
     serpapi_secret_key: str = Field("serpapi_api_key", description="Secret key name of the SerpAPI key")
@@ -114,3 +113,18 @@ def find_project_file(relative_path: str) -> Path:
 def load_config(config_path: str = "project_config.yml", env: str = "dev") -> ProjectConfig:
     """Load the settings for env from config_path (see find_project_file)."""
     return ProjectConfig.from_yaml(str(find_project_file(config_path)), env)
+
+
+def get_widget(name: str, default: str | None = None) -> str | None:
+    """Return a notebook widget or job parameter, or default when it's empty or there isn't one.
+
+    As the course's get_widget does, so a notebook runs as a job task, interactively, and from a laptop.
+    The missing widget's error differs by runtime (KeyError locally, a widget error on Databricks), so any
+    error means the default.
+    """
+    try:
+        from databricks.sdk.runtime import dbutils
+
+        return dbutils.widgets.get(name).strip() or default
+    except Exception:  # noqa: BLE001 - see the docstring
+        return default

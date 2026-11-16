@@ -14,6 +14,10 @@ from databricks.sdk import WorkspaceClient
 from databricks_mcp import DatabricksMCPClient
 from pydantic import BaseModel, ConfigDict
 
+# The bundle's dev Genie space (resources/genie_space.yml; `databricks bundle summary -t dev`), the fallback
+# for interactive runs as in the course's 3.2b. Jobs pass each target's own id as genie_space_id.
+DEV_GENIE_SPACE_ID = "01f1dc2b34f8135ab687510c5196d913"
+
 
 def outside_event_loop[T](call: Callable[[], T]) -> T:
     """Return call(), run on a worker thread when this thread already runs an event loop."""
