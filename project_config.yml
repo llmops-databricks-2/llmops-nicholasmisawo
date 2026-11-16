@@ -9,6 +9,16 @@ usage_policy_id: "ffe08ae3-a783-3201-ab0c-2fff24538807"
 # The agent's system prompt, tool guidance included, shared by every environment.
 system_prompt_file: prompts/fcr_curator.txt
 
+# Limits on the agent's turns and its tools' results (agent.py, agent_tools.py), shared by every environment.
+agent:
+  max_tool_rounds: 8           # A question needs 2 or 3; more means the model is going in circles
+  history_messages: 20         # The last 10 exchanges: enough for follow-ups, without crowding the context
+  answer_max_tokens: 4000      # Room for a reasoning model to think, then cite several FCRs
+  default_search_results: 5
+  max_search_results: 10       # More passages crowd the context without adding answers
+  excerpt_chars: 800           # Enough to judge a passage; extract_fcr_content gives the whole page
+  max_page_chars: 12000        # About 3,000 tokens: the longest FCR pages, with room for the rest of the turn
+
 # Lakebase projects may be shared across environments; Unity Catalog
 # schemas remain separate. Your cohort provisions the Lakebase values below.
 

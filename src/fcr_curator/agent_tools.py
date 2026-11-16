@@ -21,7 +21,7 @@ from typing import Protocol
 
 from databricks.sdk import WorkspaceClient
 
-from fcr_curator.config import ProjectConfig
+from fcr_curator.config import AgentSettings, ProjectConfig
 from fcr_curator.curation import MIN_NAME_KEY_CHARS, institution_key
 from fcr_curator.mcp import ToolInfo, genie_mcp_url, mcp_server_tools
 from fcr_curator.search import FCR_CLASSES, SearchFilters, SearchHit
@@ -30,49 +30,52 @@ from fcr_curator.vector_search import LakebasePgVectorManager
 
 SEARCH_FCR = "search_fcr"
 EXTRACT_FCR_CONTENT = "extract_fcr_content"
-DEFAULT_SEARCH_RESULTS = 5
-MAX_SEARCH_RESULTS = 10  # More passages crowd the context without adding answers
-EXCERPT_CHARS = 800  # Enough to judge a passage; extract_fcr_content gives the whole page
-MAX_PAGE_CHARS = 12_000  # About 3,000 tokens: the longest FCR pages, with room for the rest of the turn
 EARLIEST_REPORTING_YEAR = 2000  # Before any Bermuda FCR, so only typos are rejected
 LATEST_REPORTING_YEAR = 2100
 
-SEARCH_FCR_SPEC = {
-    "type": "function",
-    "function": {
-        "name": SEARCH_FCR,
-        "description": (
-            "Search the text of Bermuda insurers' Financial Condition Reports (FCRs) by meaning and keywords. "
-            "Use it to find passages about a topic, such as solvency ratios, capital requirements, risk "
-            "profile or governance. Returns passages with the insurer, reporting year, page, a citation URL "
-            "and an excerpt. Pass the insurer, year and licence class as filters, not in the query."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "What to find, in the terms FCRs use, e.g. 'BSCR ratio enhanced capital requirement'",
+
+def search_fcr_spec(settings: AgentSettings) -> dict:
+    """Return search_fcr's spec, its result count bounded as settings allow."""
+    return {
+        "type": "function",
+        "function": {
+            "name": SEARCH_FCR,
+            "description": (
+                "Search the text of Bermuda insurers' Financial Condition Reports (FCRs) by meaning and keywords. "
+                "Use it to find passages about a topic, such as solvency ratios, capital requirements, risk "
+                "profile or governance. Returns passages with the insurer, reporting year, page, a citation URL "
+                "and an excerpt. Pass the insurer, year and licence class as filters, not in the query."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "What to find, in the terms FCRs use, e.g. 'BSCR ratio enhanced capital requirement'",
+                    },
+                    "insurer": {
+                        "type": "string",
+                        "description": "Limit to one insurer or reinsurer by short name, e.g. 'Wilton Re'",
+                    },
+                    "reporting_year": {"type": "integer", "description": "Limit to FCRs for this year, e.g. 2024"},
+                    "fcr_class": {
+                        "type": "string",
+                        "enum": list(FCR_CLASSES),
+                        "description": "Limit to insurers holding this BMA licence class; only when the question names one",
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "description": (
+                            f"Passages to return, 1 to {settings.max_search_results} "
+                            f"(default {settings.default_search_results})"
+                        ),
+                    },
                 },
-                "insurer": {
-                    "type": "string",
-                    "description": "Limit to one insurer or reinsurer by short name, e.g. 'Wilton Re'",
-                },
-                "reporting_year": {"type": "integer", "description": "Limit to FCRs for this year, e.g. 2024"},
-                "fcr_class": {
-                    "type": "string",
-                    "enum": list(FCR_CLASSES),
-                    "description": "Limit to insurers holding this BMA licence class; only when the question names one",
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": f"Passages to return, 1 to {MAX_SEARCH_RESULTS} (default {DEFAULT_SEARCH_RESULTS})",
-                },
+                "required": ["query"],
             },
-            "required": ["query"],
         },
-    },
-}
+    }
+
 
 GET_FCR_DETAILS_SPEC = {
     "type": "function",
@@ -161,10 +164,10 @@ def checked_insurer(insurer: str | None) -> str | None:
     return insurer
 
 
-def checked_result_count(num_results: int) -> int:
-    """Return num_results if it's between 1 and MAX_SEARCH_RESULTS, else raise ToolInputError."""
-    if not 1 <= num_results <= MAX_SEARCH_RESULTS:
-        raise ToolInputError(f"num_results must be between 1 and {MAX_SEARCH_RESULTS}")
+def checked_result_count(num_results: int, maximum: int) -> int:
+    """Return num_results if it's between 1 and maximum, else raise ToolInputError."""
+    if not 1 <= num_results <= maximum:
+        raise ToolInputError(f"num_results must be between 1 and {maximum}")
     return num_results
 
 
@@ -174,7 +177,7 @@ def file_url_and_page(hit: SearchHit) -> tuple[str | None, int | None]:
     return file_url, hit.page
 
 
-def passage(hit: SearchHit) -> dict:
+def passage(hit: SearchHit, excerpt_chars: int) -> dict:
     """Return a search hit as the model sees it: where it's from, how to cite it, and an excerpt."""
     file_url, page = file_url_and_page(hit)
     return {
@@ -185,11 +188,11 @@ def passage(hit: SearchHit) -> dict:
         "page": page,
         "citation_url": hit.citation_url,
         "score": round(hit.score, 4) if hit.score is not None else None,
-        "excerpt": hit.text[:EXCERPT_CHARS],
+        "excerpt": hit.text[:excerpt_chars],
     }
 
 
-def search_fcr_tool(store: ChunkStore) -> ToolInfo:
+def search_fcr_tool(store: ChunkStore, settings: AgentSettings) -> ToolInfo:
     """Return search_fcr: hybrid search of the knowledge base in Lakebase, with optional filters."""
 
     def search_fcr(
@@ -197,20 +200,21 @@ def search_fcr_tool(store: ChunkStore) -> ToolInfo:
         insurer: str | None = None,
         reporting_year: int | None = None,
         fcr_class: str | None = None,
-        num_results: int = DEFAULT_SEARCH_RESULTS,
+        num_results: int = settings.default_search_results,
     ) -> str:
         filters = SearchFilters(
             institution=checked_insurer(insurer),
             reporting_year=checked_year(reporting_year),
             fcr_class=checked_class(fcr_class),
         )
-        hits = store.hybrid_search(required_text(query, "query"), filters, checked_result_count(num_results))
-        return json.dumps([passage(hit) for hit in hits])
+        result_count = checked_result_count(num_results, settings.max_search_results)
+        hits = store.hybrid_search(required_text(query, "query"), filters, result_count)
+        return json.dumps([passage(hit, settings.excerpt_chars) for hit in hits])
 
-    return ToolInfo(name=SEARCH_FCR, spec=SEARCH_FCR_SPEC, exec_fn=search_fcr)
+    return ToolInfo(name=SEARCH_FCR, spec=search_fcr_spec(settings), exec_fn=search_fcr)
 
 
-def extract_fcr_content_tool(store: ChunkStore) -> ToolInfo:
+def extract_fcr_content_tool(store: ChunkStore, settings: AgentSettings) -> ToolInfo:
     """Return extract_fcr_content: one page's full text, read from the knowledge base in Lakebase."""
 
     def extract_fcr_content(file_url: str, page: int) -> str:
@@ -232,8 +236,8 @@ def extract_fcr_content_tool(store: ChunkStore) -> ToolInfo:
                 "fcr_class": first.fcr_class,
                 "page": page,
                 "citation_url": citation_url,
-                "text": text[:MAX_PAGE_CHARS],
-                "truncated": len(text) > MAX_PAGE_CHARS,
+                "text": text[: settings.max_page_chars],
+                "truncated": len(text) > settings.max_page_chars,
             }
         )
 
@@ -260,7 +264,11 @@ def build_fcr_tools(workspace: WorkspaceClient, config: ProjectConfig, env: str)
     uc_tools = mcp_server_tools(workspace, uc_function_mcp_url(host, config, GET_FCR_DETAILS))
     if len(uc_tools) != 1:
         raise RuntimeError(f"Expected the {GET_FCR_DETAILS} UC function as one MCP tool, got {len(uc_tools)}")
-    tools = [search_fcr_tool(store), get_fcr_details_tool(uc_tools[0].exec_fn), extract_fcr_content_tool(store)]
+    tools = [
+        search_fcr_tool(store, config.agent),
+        get_fcr_details_tool(uc_tools[0].exec_fn),
+        extract_fcr_content_tool(store, config.agent),
+    ]
     if config.genie_space_id:
         tools.extend(mcp_server_tools(workspace, genie_mcp_url(host, config.genie_space_id)))
     return tools

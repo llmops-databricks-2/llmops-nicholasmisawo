@@ -4,9 +4,9 @@ Code controls the shape of every turn, and the model makes the decisions within 
 
 | Code controls | The model decides |
 |---|---|
-| Loading the session's last HISTORY_MESSAGES messages | Whether a question needs a tool at all |
+| Loading the session's last history_messages messages | Whether a question needs a tool at all |
 | Which tools exist, and checking their arguments | Which tool, with what arguments |
-| At most MAX_TOOL_ROUNDS rounds of tool calls, then one answer without tools | When it has enough to answer |
+| At most max_tool_rounds rounds of tool calls, then one answer without tools | When it has enough to answer |
 | Running tools; returning a bad call's error to the model | How to recover from that error |
 | Saving the question and answer, not the tool calls | The answer and its citations |
 
@@ -21,11 +21,9 @@ from loguru import logger
 from openai import OpenAI
 
 from fcr_curator.agent_tools import ToolInputError
+from fcr_curator.config import AgentSettings
 from fcr_curator.mcp import ToolInfo
 
-MAX_TOOL_ROUNDS = 8  # A question needs 2 or 3; more means the model is going in circles
-HISTORY_MESSAGES = 20  # The last 10 exchanges: enough for follow-ups, without crowding the context
-ANSWER_MAX_TOKENS = 4000  # Room for a reasoning model to think, then cite several FCRs
 NO_ANSWER = "I couldn't answer within the tool calls allowed. Please ask a narrower question."
 
 # Sent when the tool rounds run out, so the turn ends with what was found rather than nothing
@@ -76,19 +74,20 @@ class FCRAgent:
     system_prompt: str  # prompts/fcr_curator.txt, its tool guidance included
     tools: tuple[ToolInfo, ...]
     memory: ConversationMemory
+    settings: AgentSettings  # project_config.yml's agent section
 
     def answer(self, question: str, session_id: str) -> str:
         """Answer question in the session, and save the exchange for the session's next turn."""
         user_turn = {"role": "user", "content": question}
-        history = self.memory.load_messages(session_id, HISTORY_MESSAGES)
+        history = self.memory.load_messages(session_id, self.settings.history_messages)
         system_turn = {"role": "system", "content": self.system_prompt}
         reply = self._converse([system_turn, *history, user_turn])
         self.memory.save_messages(session_id, [user_turn, {"role": "assistant", "content": reply}])
         return reply
 
     def _converse(self, messages: list[Message]) -> str:
-        """Let the model call tools until it answers; after MAX_TOOL_ROUNDS rounds, have it answer without."""
-        for _ in range(MAX_TOOL_ROUNDS):
+        """Let the model call tools until it answers; after max_tool_rounds rounds, have it answer without."""
+        for _ in range(self.settings.max_tool_rounds):
             message = self._complete(messages)
             if not message.tool_calls:
                 return message.content or ""
@@ -101,7 +100,9 @@ class FCRAgent:
                 }
                 for call in message.tool_calls
             )
-        logger.warning(f"No answer after {MAX_TOOL_ROUNDS} rounds of tool calls; asking for one without tools")
+        logger.warning(
+            f"No answer after {self.settings.max_tool_rounds} rounds of tool calls; asking for one without tools"
+        )
         final = self._complete([*messages, {"role": "system", "content": ANSWER_NOW}], allow_tools=False)
         return final.content or NO_ANSWER
 
@@ -111,7 +112,7 @@ class FCRAgent:
             messages=messages,
             tools=[tool.spec for tool in self.tools],
             tool_choice="auto" if allow_tools else "none",
-            max_tokens=ANSWER_MAX_TOKENS,
+            max_tokens=self.settings.answer_max_tokens,
         )
         return response.choices[0].message
 

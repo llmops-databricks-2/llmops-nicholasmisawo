@@ -3,11 +3,22 @@
 import json
 from types import SimpleNamespace
 
-from fcr_curator.agent import HISTORY_MESSAGES, MAX_TOOL_ROUNDS, NO_ANSWER, FCRAgent
+from fcr_curator.agent import NO_ANSWER, FCRAgent
 from fcr_curator.agent_tools import ToolInputError
+from fcr_curator.config import AgentSettings
 from fcr_curator.mcp import ToolInfo
 
 SESSION = "session-1"
+# Smaller than project_config.yml's limits, so the tests show the configured values are the ones used
+SETTINGS = AgentSettings(
+    max_tool_rounds=3,
+    history_messages=4,
+    answer_max_tokens=100,
+    default_search_results=2,
+    max_search_results=4,
+    excerpt_chars=50,
+    max_page_chars=200,
+)
 HISTORY = [{"role": "user", "content": "Who is Wilton Re?"}, {"role": "assistant", "content": "A reinsurer."}]
 
 
@@ -67,7 +78,9 @@ def echo_tool(name: str = "echo") -> ToolInfo:
 
 def agent(client: FakeClient, memory: FakeMemory | None = None) -> FCRAgent:
     """Build an agent with the echo tool."""
-    return FCRAgent(client, "chat-model", "You answer FCR questions.", (echo_tool(),), memory or FakeMemory([]))
+    return FCRAgent(
+        client, "chat-model", "You answer FCR questions.", (echo_tool(),), memory or FakeMemory([]), SETTINGS
+    )
 
 
 def test_answer_runs_the_tool_the_model_calls_then_returns_its_answer() -> None:
@@ -92,16 +105,16 @@ def test_answer_starts_from_the_sessions_history_and_saves_only_the_exchange() -
         {"role": "user", "content": "And its latest FCR?"},
         {"role": "assistant", "content": "Its 2024 FCR."},
     ]
-    assert memory.limits == [HISTORY_MESSAGES]
+    assert memory.limits == [SETTINGS.history_messages]
 
 
 def test_answer_asks_for_an_answer_without_tools_once_the_rounds_run_out() -> None:
-    """After MAX_TOOL_ROUNDS rounds of tool calls, one more request forbids tools, so the turn ends with an answer."""
-    looping = [reply(tool_calls=[tool_call("echo", '{"text": "again"}')]) for _ in range(MAX_TOOL_ROUNDS)]
+    """After max_tool_rounds rounds of tool calls, one more request forbids tools, so the turn ends with an answer."""
+    looping = [reply(tool_calls=[tool_call("echo", '{"text": "again"}')]) for _ in range(SETTINGS.max_tool_rounds)]
     client = FakeClient(*looping, reply("From what I found: 245%."))
 
     assert agent(client).answer("Loop forever", SESSION) == "From what I found: 245%."
-    assert client.tool_choices == ["auto"] * MAX_TOOL_ROUNDS + ["none"]
+    assert client.tool_choices == ["auto"] * SETTINGS.max_tool_rounds + ["none"]
 
 
 def test_answer_falls_back_to_a_fixed_reply_when_even_the_final_request_is_empty() -> None:

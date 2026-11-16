@@ -5,7 +5,10 @@
 
 from pathlib import Path
 
-from fcr_curator.config import ProjectConfig
+import pytest
+from pydantic import ValidationError
+
+from fcr_curator.config import AgentSettings, ProjectConfig
 
 PROJECT_CONFIG = Path(__file__).resolve().parents[1] / "project_config.yml"
 
@@ -49,3 +52,25 @@ def test_project_config_reads_the_system_prompt_and_tool_guidance_from_the_promp
 
         assert cfg.system_prompt == prompt
         assert "HOW TO USE THE TOOLS" in cfg.system_prompt
+
+
+def test_project_config_gives_every_environment_the_agent_limits() -> None:
+    """The agent section is set once at the top of the file and applies to every environment."""
+    for env in ("dev", "acc", "prd"):
+        agent = ProjectConfig.from_yaml(str(PROJECT_CONFIG), env).agent
+
+        assert (agent.max_tool_rounds, agent.history_messages, agent.max_search_results) == (8, 20, 10)
+
+
+def test_agent_settings_refuse_a_default_search_count_above_the_maximum() -> None:
+    """A default search_fcr would reject is caught when the config loads."""
+    with pytest.raises(ValidationError, match="default_search_results"):
+        AgentSettings(
+            max_tool_rounds=8,
+            history_messages=20,
+            answer_max_tokens=4000,
+            default_search_results=11,
+            max_search_results=10,
+            excerpt_chars=800,
+            max_page_chars=12000,
+        )

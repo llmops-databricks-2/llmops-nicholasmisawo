@@ -5,17 +5,26 @@ import json
 import pytest
 
 from fcr_curator.agent_tools import (
-    EXCERPT_CHARS,
-    MAX_PAGE_CHARS,
-    MAX_SEARCH_RESULTS,
     ToolInputError,
     extract_fcr_content_tool,
     get_fcr_details_tool,
+    search_fcr_spec,
     search_fcr_tool,
 )
+from fcr_curator.config import AgentSettings
 from fcr_curator.search import NO_FILTERS, SearchFilters, SearchHit
 
 FILE_URL = "https://www.wiltonre.bm/fcr-2024.pdf"
+# Smaller than project_config.yml's limits, so the tests show the configured values are the ones used
+SETTINGS = AgentSettings(
+    max_tool_rounds=3,
+    history_messages=4,
+    answer_max_tokens=100,
+    default_search_results=2,
+    max_search_results=4,
+    excerpt_chars=50,
+    max_page_chars=200,
+)
 
 
 def hit(text: str = "BSCR ratio of 245%", page: int = 16, score: float | None = 0.0323) -> SearchHit:
@@ -47,7 +56,9 @@ def test_search_fcr_passes_the_filters_and_returns_citable_passages() -> None:
     store = FakeStore([hit()])
 
     [passage] = json.loads(
-        search_fcr_tool(store).exec_fn(query=" solvency ", insurer="Wilton Re", reporting_year=2024, num_results=3)
+        search_fcr_tool(store, SETTINGS).exec_fn(
+            query=" solvency ", insurer="Wilton Re", reporting_year=2024, num_results=3
+        )
     )
 
     assert store.searches == [("solvency", SearchFilters(institution="Wilton Re", reporting_year=2024), 3)]
@@ -56,9 +67,9 @@ def test_search_fcr_passes_the_filters_and_returns_citable_passages() -> None:
 
 def test_search_fcr_cuts_excerpts_short() -> None:
     """A long chunk comes back as an excerpt; extract_fcr_content gives the whole page."""
-    [passage] = json.loads(search_fcr_tool(FakeStore([hit("x" * 5000)])).exec_fn(query="solvency"))
+    [passage] = json.loads(search_fcr_tool(FakeStore([hit("x" * 5000)]), SETTINGS).exec_fn(query="solvency"))
 
-    assert len(passage["excerpt"]) == EXCERPT_CHARS
+    assert len(passage["excerpt"]) == SETTINGS.excerpt_chars
 
 
 @pytest.mark.parametrize(
@@ -67,7 +78,7 @@ def test_search_fcr_cuts_excerpts_short() -> None:
         {"query": "  "},
         {"query": "solvency", "fcr_class": "Class 9"},
         {"query": "solvency", "reporting_year": 24},
-        {"query": "solvency", "num_results": MAX_SEARCH_RESULTS + 1},
+        {"query": "solvency", "num_results": SETTINGS.max_search_results + 1},
         {"query": "solvency", "insurer": "Re"},
     ],
 )
@@ -76,7 +87,7 @@ def test_search_fcr_rejects_arguments_it_cant_use(arguments: dict) -> None:
     store = FakeStore([hit()])
 
     with pytest.raises(ToolInputError):
-        search_fcr_tool(store).exec_fn(**arguments)
+        search_fcr_tool(store, SETTINGS).exec_fn(**arguments)
 
     assert store.searches == []
 
@@ -85,7 +96,7 @@ def test_extract_fcr_content_joins_the_pages_chunks_in_order() -> None:
     """The page's chunks are read by its citation URL and joined in the order the store returns them."""
     store = FakeStore([hit("First"), hit("Second")])
 
-    page = json.loads(extract_fcr_content_tool(store).exec_fn(file_url=FILE_URL, page=16))
+    page = json.loads(extract_fcr_content_tool(store, SETTINGS).exec_fn(file_url=FILE_URL, page=16))
 
     assert store.pages == [f"{FILE_URL}#page=16"]
     assert (page["text"], page["truncated"], page["insurer"]) == ("First\n\nSecond", False, "Wilton Re")
@@ -93,15 +104,17 @@ def test_extract_fcr_content_joins_the_pages_chunks_in_order() -> None:
 
 def test_extract_fcr_content_truncates_a_very_long_page_and_says_so() -> None:
     """The text is capped so one page can't crowd out the rest of the turn."""
-    page = json.loads(extract_fcr_content_tool(FakeStore([hit("x" * (MAX_PAGE_CHARS + 1))])).exec_fn(FILE_URL, 1))
+    page = json.loads(
+        extract_fcr_content_tool(FakeStore([hit("x" * (SETTINGS.max_page_chars + 1))]), SETTINGS).exec_fn(FILE_URL, 1)
+    )
 
-    assert (len(page["text"]), page["truncated"]) == (MAX_PAGE_CHARS, True)
+    assert (len(page["text"]), page["truncated"]) == (SETTINGS.max_page_chars, True)
 
 
 def test_extract_fcr_content_raises_lookup_error_for_a_page_not_in_the_knowledge_base() -> None:
     """An unknown page is a LookupError, which the agent hands back to the model."""
     with pytest.raises(LookupError, match="No text for page 99"):
-        extract_fcr_content_tool(FakeStore([])).exec_fn(file_url=FILE_URL, page=99)
+        extract_fcr_content_tool(FakeStore([]), SETTINGS).exec_fn(file_url=FILE_URL, page=99)
 
 
 @pytest.mark.parametrize(
@@ -112,7 +125,7 @@ def test_extract_fcr_content_rejects_a_url_with_a_page_part_a_bare_domain_or_pag
 ) -> None:
     """file_url must be a plain http(s) PDF link, and pages count from 1."""
     with pytest.raises(ToolInputError):
-        extract_fcr_content_tool(FakeStore([hit()])).exec_fn(file_url=file_url, page=page)
+        extract_fcr_content_tool(FakeStore([hit()]), SETTINGS).exec_fn(file_url=file_url, page=page)
 
 
 def test_get_fcr_details_calls_the_uc_function_with_the_insurer() -> None:
@@ -132,3 +145,19 @@ def test_get_fcr_details_refuses_a_name_too_short_to_match_one_insurer() -> None
     """'Re' would match almost every reinsurer, so the UC function isn't called."""
     with pytest.raises(ToolInputError, match="too short"):
         get_fcr_details_tool(lambda **kwargs: "[]").exec_fn(insurer="Re")
+
+
+def test_search_fcr_spec_states_the_configured_result_counts() -> None:
+    """The model is told the configured maximum and default, which the tool then enforces."""
+    num_results = search_fcr_spec(SETTINGS)["function"]["parameters"]["properties"]["num_results"]
+
+    assert num_results["description"] == "Passages to return, 1 to 4 (default 2)"
+
+
+def test_search_fcr_returns_the_configured_default_number_of_passages() -> None:
+    """Without num_results, the search asks for default_search_results passages."""
+    store = FakeStore([hit()])
+
+    search_fcr_tool(store, SETTINGS).exec_fn(query="solvency")
+
+    assert store.searches[0][2] == SETTINGS.default_search_results

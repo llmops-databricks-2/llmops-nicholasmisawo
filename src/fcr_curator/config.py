@@ -3,10 +3,29 @@
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Folders searched for a project file: the current one and its parents
 CONFIG_SEARCH_DEPTH = 3
+
+
+class AgentSettings(BaseModel):
+    """Limits on the agent's turns and its tools' results, shared by every environment."""
+
+    max_tool_rounds: int = Field(..., gt=0, description="Rounds of tool calls before the model must answer")
+    history_messages: int = Field(..., gt=0, description="A session's latest messages loaded each turn")
+    answer_max_tokens: int = Field(..., gt=0, description="Tokens the model may spend on each reply")
+    default_search_results: int = Field(..., gt=0, description="Passages search_fcr returns by default")
+    max_search_results: int = Field(..., gt=0, description="Most passages search_fcr returns")
+    excerpt_chars: int = Field(..., gt=0, description="Characters of each search_fcr passage")
+    max_page_chars: int = Field(..., gt=0, description="Characters of a page extract_fcr_content returns")
+
+    @model_validator(mode="after")
+    def default_within_maximum(self) -> "AgentSettings":
+        """Fail at load, not mid-turn, when search_fcr's default exceeds the maximum it accepts."""
+        if self.default_search_results > self.max_search_results:
+            raise ValueError("default_search_results must not exceed max_search_results")
+        return self
 
 
 class ProjectConfig(BaseModel):
@@ -30,6 +49,7 @@ class ProjectConfig(BaseModel):
     serpapi_secret_key: str = Field("serpapi_api_key", description="Secret key name of the SerpAPI key")
 
     system_prompt: str = Field(..., description="System prompt for the FCR agent, read from system_prompt_file")
+    agent: AgentSettings = Field(..., description="Limits on the agent's turns and tools")
 
     model_config = {"populate_by_name": True}
 
@@ -58,6 +78,8 @@ class ProjectConfig(BaseModel):
         # The usage policy is shared by every environment, so it sits at the top level of the file
         if "usage_policy_id" in config_data:
             env_config["usage_policy_id"] = config_data["usage_policy_id"]
+        if "agent" in config_data:
+            env_config["agent"] = config_data["agent"]
         # The prompt is shared too, and kept in its own file (prompts/), relative to this one
         if "system_prompt_file" in config_data:
             prompt_path = Path(config_path).parent / config_data["system_prompt_file"]

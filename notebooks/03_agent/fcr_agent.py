@@ -25,7 +25,7 @@ from uuid import uuid4
 
 from databricks.sdk import WorkspaceClient
 
-from fcr_curator.agent import HISTORY_MESSAGES, FCRAgent
+from fcr_curator.agent import FCRAgent
 from fcr_curator.agent_tools import build_fcr_tools
 from fcr_curator.config import load_config
 from fcr_curator.gateway import gateway_client
@@ -44,7 +44,7 @@ cfg = load_config("project_config.yml", env=ENV)
 workspace = WorkspaceClient()
 tools = build_fcr_tools(workspace, cfg, ENV)
 memory = LakebaseMemory(workspace, cfg, ENV)
-agent = FCRAgent(gateway_client(workspace), cfg.llm_endpoint, cfg.system_prompt, tuple(tools), memory)
+agent = FCRAgent(gateway_client(workspace), cfg.llm_endpoint, cfg.system_prompt, tuple(tools), memory, cfg.agent)
 print(f"Tools: {[tool.name for tool in tools]}")
 
 # COMMAND ----------
@@ -57,5 +57,5 @@ for question in QUESTIONS:
 # COMMAND ----------
 # What the session table now holds for the next turn
 
-for message in memory.load_messages(session_id, HISTORY_MESSAGES):
+for message in memory.load_messages(session_id, cfg.agent.history_messages):
     print(f"{message['role']}: {message['content'][:120]!r}")

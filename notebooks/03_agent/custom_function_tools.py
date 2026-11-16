@@ -39,8 +39,8 @@ env = dbutils.widgets.get("env")
 cfg = load_config("../../project_config.yml", env=env)
 
 store = LakebasePgVectorManager(cfg, env, WorkspaceClient())
-search_fcr = search_fcr_tool(store)
-extract_fcr_content = extract_fcr_content_tool(store)
+search_fcr = search_fcr_tool(store, cfg.agent)
+extract_fcr_content = extract_fcr_content_tool(store, cfg.agent)
 
 # COMMAND ----------
 # 1. search_fcr
