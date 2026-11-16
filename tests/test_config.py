@@ -3,6 +3,7 @@
 `ci.yml` runs every test under tests/ on each pull request and each push to main; add yours here.
 """
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,20 +83,24 @@ def test_project_config_leaves_the_genie_space_to_the_job() -> None:
     assert "genie_space_id" not in PROJECT_CONFIG.read_text()
 
 
-def widgets(values: dict[str, str]) -> SimpleNamespace:
-    """Build dbutils with widgets holding values, raising KeyError for any other, as dbutils does locally."""
-    return SimpleNamespace(widgets=SimpleNamespace(get=lambda name: values[name]))
+def use_widgets(monkeypatch: pytest.MonkeyPatch, values: dict[str, str]) -> None:
+    """Stand in for databricks.sdk.runtime with dbutils widgets holding values, KeyError for any other.
+
+    The real module needs Databricks credentials just to import, which CI doesn't have.
+    """
+    dbutils = SimpleNamespace(widgets=SimpleNamespace(get=lambda name: values[name]))
+    monkeypatch.setitem(sys.modules, "databricks.sdk.runtime", SimpleNamespace(dbutils=dbutils))
 
 
 def test_get_widget_returns_the_widget_or_job_parameter(monkeypatch: pytest.MonkeyPatch) -> None:
     """A widget's value wins over the default, without surrounding spaces."""
-    monkeypatch.setattr("databricks.sdk.runtime.dbutils", widgets({"env": " acc "}))
+    use_widgets(monkeypatch, {"env": " acc "})
 
     assert get_widget("env", "dev") == "acc"
 
 
 def test_get_widget_falls_back_to_the_default_when_missing_or_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """No widget, as on a laptop, or an empty one gives the default."""
-    monkeypatch.setattr("databricks.sdk.runtime.dbutils", widgets({"genie_space_id": ""}))
+    use_widgets(monkeypatch, {"genie_space_id": ""})
 
     assert (get_widget("env", "dev"), get_widget("genie_space_id", "dev-space")) == ("dev", "dev-space")
