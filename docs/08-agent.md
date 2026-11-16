@@ -111,6 +111,10 @@ sequenceDiagram
 The diagram's source is also in [`diagrams/agent-sequence.mmd`](diagrams/agent-sequence.mmd), to edit in
 [mermaid.live](https://mermaid.live) or render elsewhere.
 
+The prompt, its tool guidance included, is in [`prompts/fcr_curator.txt`](../prompts/fcr_curator.txt). The
+limits below (20 messages, 8 rounds) and the tools' result sizes are in `project_config.yml`'s `agent`
+section, shared by every environment.
+
 | Code controls (`agent.py`) | The model decides |
 |---|---|
 | Loading the session's last 20 messages | Whether a question needs a tool |
@@ -157,8 +161,10 @@ With that, all four tasks passed (run `97158545668206`).
 event loop. `mcp.outside_event_loop` runs them on a worker thread there, so the same tools work from a
 laptop, a notebook or a job without `nest_asyncio`.
 
-The agent itself runs from a laptop (`notebooks/03_agent/fcr_agent.py`). `genie_space_id` in
-`project_config.yml` (from `databricks bundle summary -t dev`) gives it the Genie tools; it's set for dev.
+The agent itself runs from a laptop (`notebooks/03_agent/fcr_agent.py`). Each target deploys its own Genie
+space, so its id isn't in `project_config.yml`: the job passes the target's id as the `genie_space_id`
+parameter, and the notebooks fall back to the dev space (`mcp.DEV_GENIE_SPACE_ID`) when run interactively,
+as the course's 3.2b does.
 
 ## Findings
 
@@ -168,19 +174,31 @@ The agent itself runs from a laptop (`notebooks/03_agent/fcr_agent.py`). `genie_
   the saved history, searched 2023 and read page 14 (1,547.0 against 545.2).
 - **The model needs to know how FCRs report solvency**: asked how Wilton Re's *solvency* compared with
   its ECR, the model searched seven times for a stated "solvency ratio", which the FCR doesn't print,
-  and ran out of rounds. Two changes fixed it: `TOOL_GUIDANCE`, added to the system prompt, says FCRs
+  and ran out of rounds. Two changes fixed it: tool guidance, added to the system prompt, says FCRs
   give eligible capital and the ECR rather than the ratio, and to read a page before searching again;
   and when the rounds run out, one last request forbids tools (`tool_choice="none"`), so the turn ends
   with what was found. The same question then took 4 tool calls and the follow-up 2.
-- **Citations aren't consistent yet**: before `TOOL_GUIDANCE`, answers cited pages in a tool-style form
+- **Citations aren't consistent yet**: before the tool guidance, answers cited pages in a tool-style form
   (`【extract_fcr_content†page=15】`) without the URL; the latest run included the URL, but one run
   isn't enough to call it fixed.
 - **Genie, chosen unprompted, but asked in SQL**: asked how many listed insurers have no FCR yet, by
   licence class, and then how many Class 4 insurers have a 2024 FCR, the agent chose Genie both times
   and answered correctly (70, 36, 29 and 14; then 6, matching direct SQL). But for the second it sent
   Genie SQL against invented tables, then `SHOW TABLES` and schema queries: 7 calls. One line of
-  `TOOL_GUIDANCE`, to ask Genie in plain English, brought it to 1.
+  tool guidance, to ask Genie in plain English, brought it to 1.
 - **Found isn't filed**: the agent described insurers with no FCR in the register as not having *filed*
   one; the register only knows the pipeline hasn't *found* one.
 - **Not yet verified**: answers label the figures "US$ million", which hasn't been checked against the
   PDFs.
+
+## Review follow-ups
+
+From the lecture 3 review of PR #12:
+
+- The system prompt and its tool guidance moved from code to `prompts/fcr_curator.txt`, named by
+  `system_prompt_file` in `project_config.yml`, as the course does.
+- The agent's and tools' limits moved to `project_config.yml`'s `agent` section, checked by
+  `config.AgentSettings` when the config loads.
+- The Genie space id left `project_config.yml`: it's a job parameter, with the dev space as the
+  interactive fallback. `fcr_agent.py` takes `env` the same way, through `config.get_widget`, and logs
+  with loguru.

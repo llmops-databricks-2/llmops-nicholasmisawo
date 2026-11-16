@@ -105,7 +105,8 @@ resources/           the bundle's jobs and Genie space
 tests/               unit tests, one file per module
 docs/                design and findings
 databricks.yml       bundle targets dev, acc and prd
-project_config.yml   catalog, schema, volume and model services per environment
+project_config.yml   catalog, schema, volume and model services per environment; the agent's limits
+prompts/             the agent's system prompt and tool guidance
 ```
 
 ## Course community
