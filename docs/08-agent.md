@@ -191,6 +191,18 @@ as the course's 3.2b does.
 - **Not yet verified**: answers label the figures "US$ million", which hasn't been checked against the
   PDFs.
 
+The demo was run again after the review changes (2026-11-16): the same 2.45 and 2.84 times, with two
+problems to address later.
+
+- **An unsupported figure**: the 2024 answer also said eligible capital was "roughly 3.5 times the minimum
+  regulatory requirement". That contradicts its own 2.45, and no tool returned a minimum margin of
+  solvency, so the model made it up. A guidance line limiting ratios to those worked out from figures a
+  tool returned may help; lecture 4's evaluation should measure it.
+- **Citations without URLs, and a page not read**: the follow-up cited in tool-style form
+  (`【search_fcr†2023‑ECR】`) with no URL, and gave page 14 for the 2023 ECR without reading that page.
+  It also took 5 tool calls against 2 before, fetching details and 2024 page 15 again, since only
+  questions and answers are kept between turns.
+
 ## Review follow-ups
 
 From the lecture 3 review of PR #12:
