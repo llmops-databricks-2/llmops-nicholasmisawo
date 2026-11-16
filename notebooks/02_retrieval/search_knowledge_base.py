@@ -43,7 +43,7 @@ cfg = load_config("project_config.yml", env=ENV)
 workspace = WorkspaceClient()
 client = gateway_client(workspace)
 chat = gateway_chat(client, cfg.llm_endpoint)
-embed = gateway_embedder(client, cfg.embedding_endpoint)
+embed = gateway_embedder(client, cfg.embedding_service)
 postgres_table = synced_table_name(cfg, ENV).split(".", 1)[1]  # Postgres drops the catalog: <schema>.<table>
 
 

@@ -22,8 +22,10 @@ vars:
   # The pipeline's wheel, which the Python models install; the job passes the deployed path
   fcr_curator_wheel: ""
   # Embeddings come from the course's Unity Gateway service through Python (fcr_curator.gateway),
-  # because SQL ai_query can't reach it; the package's SQL embed() is therefore not used
-  embedding_endpoint: course_ops.gateway.embed
+  # because SQL ai_query can't reach it. Named as in project_config.yml, where embedding_endpoint is
+  # the serving endpoint and embedding_service the gateway service the OpenAI client calls
+  embedding_service: course_ops.gateway.embed
+  # The dbt_context_engineering package's own var, for its SQL embed(); that isn't used here
   embedding_model: course_ops.gateway.embed
   ai_functions_enabled: false
 

@@ -106,6 +106,6 @@ uv run dbt build --select int_fcr_documents+ --vars '{fcr_curator_wheel: <worksp
 ```
 
 dbt-core reports `CustomKeyInConfigDeprecation` for `environment_key`, `environment_dependencies`,
-`embedding_endpoint` and `volume_root` on the Python models. The first two are dbt-databricks settings,
+`embedding_service` and `volume_root` on the Python models. The first two are dbt-databricks settings,
 read from that place; the others have to be plain config keys, because a Python model sees `meta` as
 empty. They stay.

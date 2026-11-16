@@ -11,7 +11,7 @@ models:
       environment_key: fcr_curator
       environment_dependencies: ["{{ var('fcr_curator_wheel') }}"]
       # A plain config key, not meta: a Python model can read config keys but sees meta as empty
-      embedding_endpoint: "{{ var('embedding_endpoint') }}"
+      embedding_service: "{{ var('embedding_service') }}"
     columns:
       - name: id
         data_tests: [unique, not_null]

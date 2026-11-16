@@ -1,0 +1,51 @@
+# FCR Agent setup and checks (lecture 3)
+#
+# Sets up and checks each piece the agent uses, as independent tasks that run in parallel:
+#
+#   uc_function            register get_fcr_details (UC function), call it through SQL and its MCP server
+#   genie_space            ask the bundle's Genie space a question; list its MCP tools
+#   custom_function_tools  run search_fcr (Lakebase pgvector) and extract_fcr_content (custom function)
+#   session_memory         create the Lakebase session table; save and load a session's messages
+#
+# The agent itself runs from a laptop (notebooks/03_agent/fcr_agent.py). Runs on demand: no schedule.
+#
+# psycopg's binary build aborts Python on serverless compute (on environment versions 5 and 6), so the
+# two Lakebase notebooks switch psycopg to its pure-Python build first (docs/08-agent.md).
+
+resources:
+  jobs:
+    fcr_agent:
+      name: fcr_agent-${bundle.target}
+      budget_policy_id: ${var.usage_policy_id}
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: genie_space_id
+          default: ${resources.genie_spaces.fcr-curator-space.id}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: uc_function
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/03_agent/register_uc_function.py
+
+        - task_key: genie_space
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/03_agent/genie_space.py
+
+        - task_key: custom_function_tools
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/03_agent/custom_function_tools.py
+
+        - task_key: session_memory
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/03_agent/session_memory.py

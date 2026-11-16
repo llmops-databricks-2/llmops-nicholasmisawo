@@ -112,8 +112,8 @@ def connect(workspace: WorkspaceClient, config: ProjectConfig) -> "psycopg.Conne
 
     The password is a short-lived OAuth token (about an hour), so open a connection when it's needed.
     """
-    # Imported here, not at the top: loading psycopg's compiled library aborts the Python process on
-    # serverless job compute, and the sync itself only needs the Databricks SDK
+    # Imported here, not at the top: the sync only needs the Databricks SDK, and loading psycopg's binary
+    # build aborts the Python process on serverless compute (its pure-Python build works: docs/08-agent.md)
     import psycopg
 
     return psycopg.connect(**connection_settings(workspace, config), sslmode="require")

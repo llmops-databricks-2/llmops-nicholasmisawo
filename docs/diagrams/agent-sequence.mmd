@@ -1,0 +1,60 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Agent as FCRAgent<br/>(agent.py)
+    participant Memory as Session memory<br/>(Lakebase)
+    participant Model as Chat model<br/>(course_ops.gateway.chat)
+    participant Details as get_fcr_details<br/>(UC function, MCP)
+    participant Search as search_fcr<br/>(Lakebase pgvector)
+    participant Extract as extract_fcr_content<br/>(custom function)
+    participant Genie as Genie space<br/>(MCP)
+
+    User->>Agent: question + session_id
+    rect rgba(46, 160, 67, 0.15)
+        Agent->>Memory: load the last 20 messages of the session
+        Memory-->>Agent: history, oldest first
+    end
+    Agent->>Agent: system prompt + tool guidance + history + question
+
+    loop up to 8 rounds of tool calls
+        Agent->>Model: messages + tool specs
+        alt the model calls tools
+            Model-->>Agent: the tools it chose, with arguments
+            alt which reports exist
+                rect rgba(27, 169, 255, 0.15)
+                    Agent->>Details: (re)insurer
+                    Details-->>Agent: FCRs by year, licence class, PDF link
+                end
+            else find passages
+                rect rgba(130, 80, 223, 0.15)
+                    Agent->>Search: query + (re)insurer, year, class filters
+                    Search-->>Agent: passages with file_url, page, citation_url
+                end
+            else read a page
+                rect rgba(219, 97, 162, 0.15)
+                    Agent->>Extract: file_url + page
+                    Extract-->>Agent: full text of the page, in reading order
+                end
+            else count or list
+                rect rgba(240, 136, 62, 0.15)
+                    Agent->>Genie: question in plain English
+                    Genie-->>Agent: SQL result over the register and entity list
+                end
+            end
+            Note over Agent,Model: a rejected call goes back to the model as an error, so it can correct it
+        else the model has enough
+            Model-->>Agent: answer with citations, which ends the loop
+        end
+    end
+
+    rect rgba(207, 34, 46, 0.12)
+        opt the 8 rounds ran out
+            Agent->>Model: answer now, with tools disabled
+            Model-->>Agent: answer from what the tools returned
+        end
+    end
+
+    rect rgba(46, 160, 67, 0.15)
+        Agent->>Memory: save the question and answer, not the tool calls
+    end
+    Agent-->>User: answer
