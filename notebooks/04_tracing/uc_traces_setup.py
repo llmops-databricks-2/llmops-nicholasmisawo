@@ -11,7 +11,8 @@
 # MAGIC    - The agent's experiment (`experiment_path`, prefix `llmops`) was bound at onboarding: this checks it.
 # MAGIC    - The tracing demos' experiment (`demo_experiment_path`, prefix `llmops_demo`, dev only) is created
 # MAGIC      if missing, so 4.1's teaching traces stay out of the agent's tables. An experiment name alone
-# MAGIC      isolates nothing when two experiments share tables.
+# MAGIC      isolates nothing when two experiments share tables. It's in your workspace home (`~`), since only
+# MAGIC      the course can create experiments in `/llmops`.
 # MAGIC    - An experiment already bound elsewhere stops the run: it's never silently converted.
 # MAGIC 2. **Let the deployed identity write the agent's traces.** The service principal
 # MAGIC    (`sp-deploy-nicholasmisawo-<env>`, its application id in the UC secret `databricks_client_id`) gets
@@ -38,6 +39,7 @@ from fcr_curator.tracing import (
     missing_trace_access,
     trace_grants,
     trace_location,
+    workspace_path,
 )
 
 # COMMAND ----------
@@ -50,7 +52,8 @@ workspace = WorkspaceClient()
 
 experiments = {cfg.experiment_name: cfg.tracing.table_prefix}
 if cfg.demo_experiment_path:
-    experiments[cfg.demo_experiment_path] = cfg.tracing.demo_table_prefix
+    demo_experiment = workspace_path(cfg.demo_experiment_path, workspace.current_user.me().user_name)
+    experiments[demo_experiment] = cfg.tracing.demo_table_prefix
 
 # COMMAND ----------
 # 1. Bind each experiment to its trace tables (create, or check the existing binding)

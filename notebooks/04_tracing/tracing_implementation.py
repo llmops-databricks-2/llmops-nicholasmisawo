@@ -35,7 +35,7 @@ from mlflow.entities import SpanType
 
 from fcr_curator.config import get_widget, load_config
 from fcr_curator.gateway import gateway_client
-from fcr_curator.tracing import record_token_usage, release_tags, use_experiment
+from fcr_curator.tracing import record_token_usage, release_tags, use_experiment, workspace_path
 
 # COMMAND ----------
 # Settings
@@ -45,7 +45,8 @@ os.environ["GIT_SHA"] = get_widget("git_sha", "local")  # The job passes the bun
 cfg = load_config("../../project_config.yml", env=ENV)
 if not cfg.demo_experiment_path:
     raise ValueError(f"The tracing demos run in dev; {ENV} has no demo_experiment_path in project_config.yml")
-experiment = use_experiment(cfg, cfg.demo_experiment_path)
+workspace = WorkspaceClient()
+experiment = use_experiment(cfg, workspace_path(cfg.demo_experiment_path, workspace.current_user.me().user_name))
 logger.info(f"Tracing to {experiment.name} (id={experiment.experiment_id})")
 
 # COMMAND ----------
@@ -226,7 +227,7 @@ display([{"trace_id": trace.info.trace_id, "state": str(trace.info.state)} for t
 
 # COMMAND ----------
 
-client = gateway_client(WorkspaceClient())
+client = gateway_client(workspace)
 
 
 @mlflow.trace(span_type=SpanType.LLM)

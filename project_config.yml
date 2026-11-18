@@ -40,7 +40,8 @@ dev:
   embedding_service: "course_ops.gateway.embed"
   warehouse_id: "86722fe1a817f6aa"
   experiment_path: "/llmops/nicholasmisawo-dev"
-  demo_experiment_path: "/llmops/nicholasmisawo-dev-demos"   # 4.1's teaching traces, apart from the agent's
+  # 4.1's teaching traces, apart from the agent's. In your workspace home (~): only the course can create in /llmops
+  demo_experiment_path: "~/nicholasmisawo-dev-demos"
   # Your provisioned Lakebase project.
   lakebase_instance: "lb-llmops-nicholasmisawo"
 

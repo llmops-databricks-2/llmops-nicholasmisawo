@@ -42,6 +42,16 @@ class TraceGrant:
     privileges: tuple[Privilege, ...]
 
 
+def workspace_path(path: str, user_name: str) -> str:
+    """Return path with a leading ~ expanded to user_name's workspace home, /Users/<user_name>.
+
+    Lets project_config.yml name an experiment in whoever runs it's home without naming them.
+    """
+    if path == "~" or path.startswith("~/"):
+        return f"/Users/{user_name}{path[1:]}"
+    return path
+
+
 def trace_location(config: ProjectConfig, table_prefix: str) -> UnityCatalog:
     """Return where traces with table_prefix live: <catalog>.<schema>.<table_prefix>_otel_spans and beside it."""
     return UnityCatalog(catalog_name=config.catalog, schema_name=config.schema, table_prefix=table_prefix)

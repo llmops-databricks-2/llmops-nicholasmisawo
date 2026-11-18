@@ -15,6 +15,7 @@ from fcr_curator.tracing import (
     missing_trace_access,
     release_tags,
     trace_grants,
+    workspace_path,
 )
 
 LOCATION = UnityCatalog(catalog_name="llmops_dev", schema_name="nicholasmisawo", table_prefix="llmops")
@@ -178,3 +179,9 @@ def test_release_tags_name_the_app_before_the_serving_endpoint(monkeypatch: pyte
     monkeypatch.setenv("MODEL_SERVING_ENDPOINT_NAME", "fcr-endpoint")
 
     assert release_tags() == {"git_sha": "f16aa9a", "deployment_name": "fcr-agent-dev", "model_version": "3"}
+
+
+def test_workspace_path_expands_a_leading_tilde_to_the_users_home() -> None:
+    """~ names the home of whoever runs the notebook; other paths are kept as they are."""
+    assert workspace_path("~/fcr-demos", "analyst@example.com") == "/Users/analyst@example.com/fcr-demos"
+    assert workspace_path("/llmops/fcr-dev", "analyst@example.com") == "/llmops/fcr-dev"

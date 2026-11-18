@@ -124,6 +124,6 @@ def test_project_config_keeps_the_tracing_demos_in_their_own_dev_experiment() ->
 
     assert (dev.experiment_name, dev.demo_experiment_path) == (
         "/llmops/nicholasmisawo-dev",
-        "/llmops/nicholasmisawo-dev-demos",
+        "~/nicholasmisawo-dev-demos",
     )
     assert ProjectConfig.from_yaml(str(PROJECT_CONFIG), "acc").demo_experiment_path is None
