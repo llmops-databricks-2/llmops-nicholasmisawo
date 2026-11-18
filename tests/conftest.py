@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import mlflow
 import pytest
 import yaml
 
@@ -23,3 +24,13 @@ def landed_columns() -> dict[str, set[str]]:
     return {
         table["name"]: {column["name"] for column in table["columns"]} - {"landed_at"} for table in landed["tables"]
     }
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_tracing(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Switch tracing off, with any MLflow store in a temporary folder; a test reading traces enables it.
+
+    Enabling tracing creates MLflow's default store, ./mlflow.db, so the session never re-enables it there.
+    """
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path_factory.mktemp('mlflow') / 'mlflow.db'}")
+    mlflow.tracing.disable()
