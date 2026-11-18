@@ -14,6 +14,7 @@ spans them. Each stage page explains how it works, then records the findings fro
 | [06 Search](06-search.md) | Semantic, filtered, keyword and hybrid search, reranking, query rewriting, the token budget |
 | [07 Context engineering](07-context-engineering.md) | Every strategy that controls what reaches the model, and where it lives |
 | [08 Agent](08-agent.md) | The agent's tools, orchestration (a Mermaid sequence diagram) and session memory |
+| [09 Tracing](09-tracing.md) | Traces in Unity Catalog, who can write them, the traced agent's span tree, and where it differs from the course |
 
 ## Submissions
 

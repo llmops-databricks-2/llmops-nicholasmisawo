@@ -50,6 +50,7 @@ and every citation opens the PDF at the cited page. The design, and what we foun
 | [06 Search](docs/06-search.md) | Filtered, keyword and hybrid search, reranking, rewriting, token budget |
 | [07 Context engineering](docs/07-context-engineering.md) | Every strategy that shapes what the model sees |
 | [08 Agent](docs/08-agent.md) | The agent's tools, orchestration and session memory in Lakebase |
+| [09 Tracing](docs/09-tracing.md) | Traces in Unity Catalog, who can write them, and the traced agent |
 
 ## Quick start
 
@@ -92,6 +93,13 @@ databricks bundle run fcr_agent -t dev
 env -u DATABRICKS_WORKSPACE_ID DATABRICKS_CONFIG_PROFILE=<profile> uv run python notebooks/03_agent/fcr_agent.py
 ```
 
+Trace it: set up trace storage and grants, then run the tracing examples and the traced agent (the
+`fcr_tracing` job, described in [09 Tracing](docs/09-tracing.md)):
+
+```bash
+databricks bundle run fcr_tracing -t dev
+```
+
 ## Project layout
 
 ```text
@@ -100,6 +108,7 @@ notebooks/
   01_ingestion/      search_fcrs (SerpAPI and pages), download_fcrs
   02_retrieval/      sync to Lakebase, search walkthrough, UI search queries (search_examples.sql)
   03_agent/          the agent's setup checks (UC function, Genie, tools, memory) and the agent itself
+  04_tracing/        UC trace setup and grants, the tracing APIs, and the traced agent
 dbt/                 dbt project (own environment): BMA seeds, search plan, curation, parsing, chunking, embeddings
 resources/           the bundle's jobs and Genie space
 tests/               unit tests, one file per module
