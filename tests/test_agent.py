@@ -10,10 +10,11 @@ from mlflow.entities import SpanType
 from mlflow.tracing.constant import SpanAttributeKey
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
-from fcr_curator.agent import NO_ANSWER, FCRAgent, ToolLoop, record_token_usage, response_text
+from fcr_curator.agent import NO_ANSWER, FCRAgent, ToolLoop, response_text
 from fcr_curator.agent_tools import ToolInputError
 from fcr_curator.config import AgentSettings
 from fcr_curator.mcp import ToolInfo
+from fcr_curator.tracing import record_token_usage
 
 SESSION = "session-1"
 REQUEST = "request-1"
@@ -225,7 +226,7 @@ def test_record_token_usage_puts_the_gateways_counts_on_the_llm_span() -> None:
     span = FakeSpan()
     usage = SimpleNamespace(prompt_tokens=120, completion_tokens=30, total_tokens=150)
 
-    with patch("fcr_curator.agent.mlflow.get_current_active_span", return_value=span):
+    with patch("fcr_curator.tracing.mlflow.get_current_active_span", return_value=span):
         record_token_usage(usage)
 
     assert span.attributes[SpanAttributeKey.CHAT_USAGE] == {
@@ -239,7 +240,7 @@ def test_record_token_usage_leaves_missing_usage_missing_rather_than_zero() -> N
     """A reply without usage records nothing, so it can't be read as zero tokens."""
     span = FakeSpan()
 
-    with patch("fcr_curator.agent.mlflow.get_current_active_span", return_value=span):
+    with patch("fcr_curator.tracing.mlflow.get_current_active_span", return_value=span):
         record_token_usage(None)
 
     assert span.attributes == {}

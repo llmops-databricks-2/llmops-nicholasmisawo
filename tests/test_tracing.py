@@ -12,6 +12,7 @@ from fcr_curator.tracing import (
     TraceGrant,
     bind_experiment,
     grant_trace_access,
+    missing_trace_access,
     release_tags,
     trace_grants,
 )
@@ -86,12 +87,13 @@ def table(name: str, table_type: TableType = TableType.MANAGED) -> SimpleNamespa
     return SimpleNamespace(name=name, full_name=f"llmops_dev.nicholasmisawo.{name}", table_type=table_type)
 
 
-def test_trace_grants_cover_only_the_prefixed_objects_tables_to_write_and_views_to_read() -> None:
+def test_trace_grants_cover_the_prefixes_trace_objects_tables_to_write_and_views_to_read() -> None:
     """Trace tables get SELECT and MODIFY, trace views SELECT; other tables and other prefixes nothing."""
     tables = [
         table("llmops_otel_spans"),
         table("llmops_trace_unified", TableType.VIEW),
         table("llmops_demo_otel_spans"),
+        table("llmops_notes"),
         table("fcr_register"),
     ]
 
@@ -100,8 +102,48 @@ def test_trace_grants_cover_only_the_prefixed_objects_tables_to_write_and_views_
     assert grants == [
         TraceGrant("llmops_dev.nicholasmisawo.llmops_otel_spans", TABLE_PRIVILEGES),
         TraceGrant("llmops_dev.nicholasmisawo.llmops_trace_unified", VIEW_PRIVILEGES),
-        TraceGrant("llmops_dev.nicholasmisawo.llmops_demo_otel_spans", TABLE_PRIVILEGES),
     ]
+
+
+def test_trace_grants_for_the_demo_prefix_leave_the_agents_objects_alone() -> None:
+    """The demos' prefix matches its own trace objects only."""
+    tables = [table("llmops_otel_spans"), table("llmops_demo_otel_spans")]
+
+    assert trace_grants(tables, "llmops_demo") == [
+        TraceGrant("llmops_dev.nicholasmisawo.llmops_demo_otel_spans", TABLE_PRIVILEGES)
+    ]
+
+
+def workspace_with_grants(held: dict[str, list[Privilege]]) -> SimpleNamespace:
+    """Build a workspace whose objects grant the app-id principal the given privileges, and others SELECT."""
+
+    def get(securable_type: str, full_name: str) -> SimpleNamespace:
+        assignments = [
+            SimpleNamespace(principal="app-id", privileges=held.get(full_name, [])),
+            SimpleNamespace(principal="someone-else", privileges=[Privilege.SELECT, Privilege.MODIFY]),
+        ]
+        return SimpleNamespace(privilege_assignments=assignments)
+
+    return SimpleNamespace(grants=SimpleNamespace(get=get))
+
+
+def test_missing_trace_access_names_each_object_and_privilege_the_principal_lacks() -> None:
+    """Only the principal's own direct grants count, not another principal's."""
+    grants = [
+        TraceGrant("c.s.llmops_otel_spans", TABLE_PRIVILEGES),
+        TraceGrant("c.s.llmops_otel_logs", TABLE_PRIVILEGES),
+    ]
+    workspace = workspace_with_grants({"c.s.llmops_otel_spans": [Privilege.SELECT, Privilege.MODIFY]})
+
+    assert missing_trace_access(workspace, grants, "app-id") == ["c.s.llmops_otel_logs: SELECT, MODIFY"]
+
+
+def test_missing_trace_access_is_empty_once_every_grant_is_in_place() -> None:
+    """A principal holding SELECT and MODIFY on every trace table lacks nothing."""
+    grants = [TraceGrant("c.s.llmops_otel_spans", TABLE_PRIVILEGES)]
+    workspace = workspace_with_grants({"c.s.llmops_otel_spans": [Privilege.MODIFY, Privilege.SELECT]})
+
+    assert missing_trace_access(workspace, grants, "app-id") == []
 
 
 def test_grant_trace_access_adds_each_grant_for_the_principal() -> None:

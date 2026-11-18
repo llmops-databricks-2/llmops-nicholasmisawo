@@ -41,7 +41,6 @@ from databricks.sdk import WorkspaceClient
 from loguru import logger
 from mlflow.entities import SpanType
 from mlflow.pyfunc import ResponsesAgent
-from mlflow.tracing.constant import SpanAttributeKey, TokenUsageKey
 from mlflow.types.responses import (
     ResponsesAgentRequest,
     ResponsesAgentResponse,
@@ -55,7 +54,7 @@ from fcr_curator.config import AgentSettings, ProjectConfig
 from fcr_curator.gateway import gateway_client, retry_when_rate_limited
 from fcr_curator.mcp import ToolInfo
 from fcr_curator.memory import LakebaseMemory
-from fcr_curator.tracing import release_tags
+from fcr_curator.tracing import record_token_usage, release_tags
 
 NO_ANSWER = "I couldn't answer within the tool calls allowed. Please ask a narrower question."
 # Sent when the tool rounds run out, so the turn ends with what was found rather than nothing
@@ -106,21 +105,6 @@ def tool_call_items(call: Any, result: str) -> list[Message]:  # noqa: ANN401 - 
         ResponsesAgent.create_function_call_item(call.id, call.id, call.function.name, call.function.arguments),
         ResponsesAgent.create_function_call_output_item(call.id, result),
     ]
-
-
-def record_token_usage(usage: Any) -> None:  # noqa: ANN401 - the OpenAI SDK's CompletionUsage, or None
-    """Record the gateway's token counts on the current LLM span; missing usage is left missing, not zero."""
-    span = mlflow.get_current_active_span()
-    if usage is None or span is None:
-        return
-    span.set_attribute(
-        SpanAttributeKey.CHAT_USAGE,
-        {
-            TokenUsageKey.INPUT_TOKENS: usage.prompt_tokens,
-            TokenUsageKey.OUTPUT_TOKENS: usage.completion_tokens,
-            TokenUsageKey.TOTAL_TOKENS: usage.total_tokens,
-        },
-    )
 
 
 def response_text(response: ResponsesAgentResponse) -> str:
