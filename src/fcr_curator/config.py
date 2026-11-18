@@ -28,6 +28,16 @@ class AgentSettings(BaseModel):
         return self
 
 
+class TracingSettings(BaseModel):
+    """Where MLflow keeps traces in Unity Catalog, and who may write them, shared by every environment."""
+
+    table_prefix: str = Field(..., description="Prefix of the agent experiment's trace tables (<prefix>_otel_spans)")
+    demo_table_prefix: str = Field(..., description="Prefix of the tracing demos' experiment's trace tables")
+    service_principal_secret: str = Field(
+        ..., description="UC secret in <catalog>.<schema> holding the service principal's application id"
+    )
+
+
 class ProjectConfig(BaseModel):
     """Project configuration model."""
 
@@ -40,7 +50,10 @@ class ProjectConfig(BaseModel):
         ..., description="Serving endpoint for ai_query, AI Search and DatabricksServingEndpoint"
     )
     embedding_service: str = Field(..., description="AI Gateway embedding model service, for the OpenAI client")
-    experiment_path: str = Field(..., description="MLflow experiment path for this environment")
+    experiment_path: str = Field(..., description="MLflow experiment path of the agent's traces")
+    demo_experiment_path: str | None = Field(
+        None, description="MLflow experiment path of the tracing demos (dev only), apart from the agent's"
+    )
     warehouse_id: str = Field(..., description="Warehouse ID")
     lakebase_instance: str = Field(..., description="Lakebase project ID")
 
@@ -49,6 +62,7 @@ class ProjectConfig(BaseModel):
 
     system_prompt: str = Field(..., description="System prompt for the FCR agent, read from system_prompt_file")
     agent: AgentSettings = Field(..., description="Limits on the agent's turns and tools")
+    tracing: TracingSettings = Field(..., description="Unity Catalog trace storage and its writer")
 
     model_config = {"populate_by_name": True}
 
@@ -77,8 +91,9 @@ class ProjectConfig(BaseModel):
         # The usage policy is shared by every environment, so it sits at the top level of the file
         if "usage_policy_id" in config_data:
             env_config["usage_policy_id"] = config_data["usage_policy_id"]
-        if "agent" in config_data:
-            env_config["agent"] = config_data["agent"]
+        for shared in ("agent", "tracing"):
+            if shared in config_data:
+                env_config[shared] = config_data[shared]
         # The prompt is shared too, and kept in its own file (prompts/), relative to this one
         if "system_prompt_file" in config_data:
             prompt_path = Path(config_path).parent / config_data["system_prompt_file"]
@@ -90,6 +105,11 @@ class ProjectConfig(BaseModel):
     def schema(self) -> str:
         """Alias for db_schema for backward compatibility."""
         return self.db_schema
+
+    @property
+    def experiment_name(self) -> str:
+        """Return the agent's experiment, as the course's config names it."""
+        return self.experiment_path
 
     @property
     def full_schema_name(self) -> str:

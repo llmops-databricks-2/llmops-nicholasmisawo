@@ -19,6 +19,14 @@ agent:
   excerpt_chars: 800           # Enough to judge a passage; extract_fcr_content gives the whole page
   max_page_chars: 12000        # About 3,000 tokens: the longest FCR pages, with room for the rest of the turn
 
+# MLflow traces in Unity Catalog (src/fcr_curator/tracing.py, notebooks/04_tracing), shared by every environment.
+# Each experiment's traces go to <catalog>.<schema>.<prefix>_otel_spans and the views beside it; the agent and
+# the tracing demos have their own prefixes, since an experiment name alone isolates nothing in the tables.
+tracing:
+  table_prefix: llmops                 # The course bound the agent experiments to these tables at onboarding
+  demo_table_prefix: llmops_demo
+  service_principal_secret: databricks_client_id   # The deploy service principal, granted write access by 4.0
+
 # Lakebase projects may be shared across environments; Unity Catalog
 # schemas remain separate. Your cohort provisions the Lakebase values below.
 
@@ -32,6 +40,7 @@ dev:
   embedding_service: "course_ops.gateway.embed"
   warehouse_id: "86722fe1a817f6aa"
   experiment_path: "/llmops/nicholasmisawo-dev"
+  demo_experiment_path: "/llmops/nicholasmisawo-dev-demos"   # 4.1's teaching traces, apart from the agent's
   # Your provisioned Lakebase project.
   lakebase_instance: "lb-llmops-nicholasmisawo"
 
