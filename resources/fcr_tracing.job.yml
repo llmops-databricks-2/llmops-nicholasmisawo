@@ -1,0 +1,53 @@
+# FCR tracing (lecture 4: 4.0 to 4.2)
+#
+# The course's lecture4-tracing-evaluation job for this project, its tasks in order, since each needs the one
+# before it:
+#
+#   uc_traces_setup         bind the experiments to their UC trace tables; grant the deploy service principal
+#                           SELECT/MODIFY on the agent's trace tables and check it holds them
+#   tracing_implementation  the tracing APIs, with FCR examples, traced to the demo experiment (dev only)
+#   custom_agent            the FCR agent, traced to its own experiment: one request, then a two-turn session
+#
+# Evaluation and logging (4.3, 4.4) come later. Runs on demand: no schedule.
+#
+# git_sha is the bundle's commit, so each trace names the code that produced it (the course's job hard-codes one).
+
+resources:
+  jobs:
+    fcr_tracing:
+      name: fcr_tracing-${bundle.target}
+      budget_policy_id: ${var.usage_policy_id}
+      max_concurrent_runs: 1
+      parameters:
+        - name: env
+          default: ${bundle.target}
+        - name: genie_space_id
+          default: ${resources.genie_spaces.fcr-curator-space.id}
+        - name: git_sha
+          default: ${bundle.git.commit}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: uc_traces_setup
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/04_tracing/uc_traces_setup.py
+
+        - task_key: tracing_implementation
+          depends_on:
+            - task_key: uc_traces_setup
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/04_tracing/tracing_implementation.py
+
+        - task_key: custom_agent
+          depends_on:
+            - task_key: tracing_implementation
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/04_tracing/custom_agent.py
