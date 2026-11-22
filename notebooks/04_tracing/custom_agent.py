@@ -53,6 +53,7 @@ import mlflow
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.runtime import display
 from loguru import logger
+from mlflow.entities import SpanStatusCode, SpanType, Trace
 from mlflow.types.responses import ResponsesAgentRequest
 
 from fcr_curator.agent import FCRAgent, response_text
@@ -88,6 +89,17 @@ def ask(question: str, session_id: str) -> str:
         custom_inputs={"session_id": session_id, "request_id": f"req-{uuid4()}"},
     )
     return response_text(agent.predict(request))
+
+
+def traces_of(session_id: str) -> list[Trace]:
+    """Return the session's traces, oldest first, found by the session id the agent puts in their metadata."""
+    return mlflow.search_traces(
+        locations=[experiment.experiment_id],
+        filter_string=f"request_metadata.`mlflow.trace.session` = '{session_id}'",
+        order_by=["timestamp_ms ASC"],
+        return_type="list",
+        flush=True,
+    )
 
 
 # COMMAND ----------
@@ -128,13 +140,7 @@ for question in (
 
 # COMMAND ----------
 
-session_traces = mlflow.search_traces(
-    locations=[experiment.experiment_id],
-    filter_string=f"request_metadata.`mlflow.trace.session` = '{conversation}'",
-    order_by=["timestamp_ms ASC"],
-    return_type="list",
-    flush=True,
-)
+session_traces = traces_of(conversation)
 logger.info(f"{len(session_traces)} traces in session {conversation}")
 display(
     [
@@ -194,7 +200,51 @@ for span in trace.data.spans:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 8. What to check in a trace
+# MAGIC ## 8. An edge case: a real insurer the tools refuse
+# MAGIC
+# MAGIC "AXA" is a Bermuda insurer's real short name (AXA XL), but the tools refuse names under four
+# MAGIC letters, since short names match several companies. The refusal goes back to the model as an error
+# MAGIC it can act on. The trace shows which step failed and why: the tool span is marked as an error, with
+# MAGIC the exception's message, while the turn itself still succeeds.
+
+# COMMAND ----------
+
+edge_session = f"s-{uuid4()}"
+edge_answer = ask("Which FCRs has AXA published?", edge_session)
+[edge_trace] = traces_of(edge_session)
+logger.info(f"Trace {edge_trace.info.trace_id}: {edge_trace.info.state}\nAnswer: {edge_answer}")
+
+tool_calls = [span for span in edge_trace.data.spans if span.span_type == SpanType.TOOL]
+for span in tool_calls:
+    errors = [event.attributes.get("exception.message") for event in span.events if event.name == "exception"]
+    logger.info(f"  {span.name}({span.inputs}) -> {span.status.status_code.value} {errors or ''}")
+if not any(span.status.status_code == SpanStatusCode.ERROR for span in tool_calls):
+    logger.warning("No tool refused a call this time: the model chose another route (read the tool spans above)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 9. Is the UC function slow, or was the warehouse cold?
+# MAGIC
+# MAGIC `get_fcr_details` took 38 to 47 seconds in earlier runs, each the first call in days. The same question
+# MAGIC twice in a row tells the two apart: if the second call is fast, the first was waiting for compute.
+
+# COMMAND ----------
+
+details_seconds = []
+for attempt in (1, 2):
+    attempt_session = f"s-{uuid4()}"
+    ask("List the FCRs Wilton Re has published.", attempt_session)
+    [attempt_trace] = traces_of(attempt_session)
+    details = [span for span in attempt_trace.data.spans if span.name == "get_fcr_details"]
+    seconds = [round((span.end_time_ns - span.start_time_ns) / 1e9, 1) for span in details]
+    details_seconds.append(seconds)
+    logger.info(f"Attempt {attempt}: get_fcr_details took {seconds or 'no call'} s")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 10. What to check in a trace
 # MAGIC
 # MAGIC | Symptom | Evidence in the trace |
 # MAGIC |---|---|

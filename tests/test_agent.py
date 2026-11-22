@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import mlflow
 import pytest
-from mlflow.entities import SpanType
+from mlflow.entities import SpanStatusCode, SpanType
 from mlflow.tracing.constant import SpanAttributeKey
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
@@ -277,3 +277,17 @@ def test_predict_traces_the_turn_as_the_course_lays_it_out_with_memory_and_llm_s
         ("predict", SpanType.AGENT, None),
         ("predict_stream", SpanType.AGENT, "predict"),
     ]
+
+
+@pytest.mark.usefixtures("tracing_on")
+def test_a_refused_tool_call_marks_its_span_as_an_error_while_the_turn_succeeds() -> None:
+    """The trace shows which step failed and why, though the model recovered and answered."""
+    client = FakeClient(reply(tool_calls=[tool_call("echo", '{"text": ""}')]), reply("Please give a longer name."))
+
+    ask(agent(client), "Which FCRs has AXA published?", SESSION)
+
+    trace = mlflow.get_trace(mlflow.get_last_active_trace_id(), flush=True)
+    [tool_span] = [span for span in trace.data.spans if span.span_type == SpanType.TOOL]
+    [exception] = [event for event in tool_span.events if event.name == "exception"]
+    assert (str(trace.info.state), tool_span.status.status_code) == ("OK", SpanStatusCode.ERROR)
+    assert exception.attributes["exception.message"] == "text is required"
