@@ -47,6 +47,7 @@ if "DATABRICKS_RUNTIME_VERSION" in os.environ:
 
 # COMMAND ----------
 
+import time
 from uuid import uuid4
 
 import mlflow
@@ -71,6 +72,9 @@ cfg = load_config("../../project_config.yml", env=ENV)
 experiment = use_experiment(cfg, cfg.experiment_name)
 logger.info(f"Tracing to {experiment.name} (id={experiment.experiment_id})")
 
+TRACE_WAIT_SECONDS = 180  # How long a search waits for new traces to reach Unity Catalog
+TRACE_POLL_SECONDS = 10
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -91,15 +95,28 @@ def ask(question: str, session_id: str) -> str:
     return response_text(agent.predict(request))
 
 
-def traces_of(session_id: str) -> list[Trace]:
-    """Return the session's traces, oldest first, found by the session id the agent puts in their metadata."""
-    return mlflow.search_traces(
-        locations=[experiment.experiment_id],
-        filter_string=f"request_metadata.`mlflow.trace.session` = '{session_id}'",
-        order_by=["timestamp_ms ASC"],
-        return_type="list",
-        flush=True,
-    )
+def traces_of(session_id: str, expected: int = 1) -> list[Trace]:
+    """Return the session's traces, oldest first, waiting until `expected` of them can be searched.
+
+    Traces reach the Unity Catalog tables after a delay, so a search straight after a request can come
+    back empty. Raises TimeoutError if they haven't arrived after TRACE_WAIT_SECONDS.
+    """
+    deadline = time.monotonic() + TRACE_WAIT_SECONDS
+    while True:
+        traces = mlflow.search_traces(
+            locations=[experiment.experiment_id],
+            filter_string=f"request_metadata.`mlflow.trace.session` = '{session_id}'",
+            order_by=["timestamp_ms ASC"],
+            return_type="list",
+            flush=True,
+        )
+        if len(traces) >= expected:
+            return traces
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"{len(traces)} of {expected} traces for session {session_id} after {TRACE_WAIT_SECONDS}s"
+            )
+        time.sleep(TRACE_POLL_SECONDS)
 
 
 # COMMAND ----------
@@ -140,7 +157,7 @@ for question in (
 
 # COMMAND ----------
 
-session_traces = traces_of(conversation)
+session_traces = traces_of(conversation, expected=2)
 logger.info(f"{len(session_traces)} traces in session {conversation}")
 display(
     [
