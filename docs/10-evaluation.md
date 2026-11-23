@@ -96,8 +96,13 @@ skip it instead, as the code scorers do.
 
 Before any review, the judge was checked on fixed answers written to have known verdicts: it rated the
 correct answer `supported`, the agent's own "3.5 times" `unsupported` (working out 4.66 from the MSM), and
-a refusal `no_claims`. Your verdicts on the dev answers go in `evaluation/human_labels.yml`; 4.4 then logs
-how often the judge agrees with you (`judge_human_agreement`). That review hasn't been done yet.
+a refusal `no_claims`.
+
+Checking it against a person needs both to rate **the same answers**, so it doesn't happen in 4.4, whose run
+produces new ones. `evaluation/review_sheet.md` lists version 1's dev answers with their questions and
+evidence, without the judge's verdicts, so they don't steer the reviewer. The reviewer's verdicts go in
+`evaluation/human_labels.yml`, which names that run; `notebooks/04_tracing/judge_review.py` compares them with
+the judge's verdicts from the same run and logs the agreement, and each disagreement, to it.
 
 ## Results
 

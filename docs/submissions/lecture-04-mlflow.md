@@ -13,8 +13,8 @@ course notebook (4.0 to 4.4).
 | 1. One successful trace and one failure, with the step that caused it | Wilton Re's 76 s answer (the UC function took 47 s); AXA, whose short name the tool refused, and how the model recovered | [09 Tracing](../09-tracing.md#a-failure-and-the-step-that-caused-it) |
 | 2. Cases with expected behaviour and context, including a follow-up, missing evidence and a known failure | 16 reviewed cases, 10 dev and 6 holdout, each with the FCR pages or register rows behind it | `evaluation/fcr_eval_cases.yml` |
 | 2. A deterministic check and a task-specific judge | 4 code scorers; MLflow's correctness and per-case guideline judges; a custom `evidence_support` judge | `src/fcr_curator/scorers.py` |
-| 2. Read outputs and rationales; a case a superficial check passes wrongly | The "3.5 times" answer states a correct figure, so `figures_stated` gives it credit; only the judges catch the wrong ratio | [10 Evaluation](../10-evaluation.md#the-scorers) |
-| 2. Review the judge against human decisions; a holdout for changes | Checked on answers with known verdicts; `judge_agreement` compares it with your verdicts once given | `evaluation/human_labels.yml` |
+| 2. Read outputs and rationales; a case a superficial check passes wrongly | The "3.5 times" answer states a correct figure, so `figures_stated` gives it credit; only the judges catch the wrong ratio. In version 1's run, `wilton_2024_capital_vs_ecr` scores 1.00 on figures but fails its guideline (the ratio isn't flagged as worked out) | [Evidence](../evidence/lecture-04-evaluation.md) |
+| 2. Review the judge against human decisions; a holdout for changes | A blind review sheet of version 1's dev answers; your verdicts compared with the judge's on the same answers (`judge_review`), disagreements logged to the run. Holdout kept apart | `evaluation/review_sheet.md`, `evaluation/human_labels.yml` |
 | 3. Log code, configuration and metrics; register a version | `fcr_agent` version 1, from code, with both splits' metrics and the release tags; alias `latest-model` | [10 Evaluation](../10-evaluation.md#the-registered-version) |
 | 3. Which identity runs it, and what it must reach | The deploy service principal, and each resource with its access and status | [10 Evaluation](../10-evaluation.md#which-identity-will-run-it-and-what-it-needs) |
 | 3. Concrete version, configuration and limitations | Version 1 at commit `b584a31`, job run `461977044469071`; what still fails, below | This page |
@@ -41,6 +41,12 @@ course notebook (4.0 to 4.4).
 - **The judges run on a different model family from the agent's**, and skip cases they can't score.
 - **`evidence_support` gives named verdicts**, not a 1-to-5 score: `supported`, `unsupported`,
   `insufficient_evidence` or `no_claims`.
+
+## Evidence
+
+Per-case scores, trace ids and the judges' reasons for version 1's evaluation runs are in
+[evidence/lecture-04-evaluation.md](../evidence/lecture-04-evaluation.md), exported from MLflow with workspace
+URLs and user names left out. The success and failure traces are in [09 Tracing](../09-tracing.md).
 
 ## Results (4.4)
 
@@ -75,5 +81,6 @@ course notebook (4.0 to 4.4).
 - **Running out of rounds** on questions with no answer, rather than saying so sooner.
 - **Run-to-run variation.** The means moved by up to 0.5 between runs of the same code. One run per version
   can't show a change helped beyond the failure it targeted, so comparisons need several runs, or more cases.
-- **The judge hasn't been reviewed by a person yet.** Your verdicts go in `evaluation/human_labels.yml`; a
-  rerun of `log_register` with `register=false` then reports how often the judge agrees.
+- **One reviewer.** The judge is checked against one person's verdicts. The notes ask for several reviewers,
+  and their disagreements, before treating any one as ground truth; that, and the Alternative Annotator Test,
+  would be needed before letting the judge replace review.
