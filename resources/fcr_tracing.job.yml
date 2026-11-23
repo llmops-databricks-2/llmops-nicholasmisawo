@@ -9,6 +9,7 @@
 #   custom_agent            the FCR agent, traced to its own experiment: one request, then a two-turn session
 #   evaluation_theory       the scorers and judges on fixed answers, to the demo experiment
 #   log_register            evaluate the agent on the dev and holdout cases, then log and register it
+#   judge_review            compare your verdicts (evaluation/human_labels.yml) with the judge's on the same run
 #
 # register=false evaluates without registering, to compare a change. Runs on demand: no schedule.
 #
@@ -71,3 +72,10 @@ resources:
           environment_key: default
           notebook_task:
             notebook_path: ../notebooks/04_tracing/log_register.py
+
+        - task_key: judge_review
+          depends_on:
+            - task_key: log_register
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/04_tracing/judge_review.py

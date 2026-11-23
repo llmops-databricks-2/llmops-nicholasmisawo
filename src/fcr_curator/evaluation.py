@@ -143,3 +143,11 @@ def make_predict_fn(agent: Agent) -> Callable[..., str]:
 def load_human_verdicts(path: str | Path) -> dict[str, str | None]:
     """Return a reviewer's verdicts by case id; None where a case hasn't been reviewed yet."""
     return dict(yaml.safe_load(Path(path).read_text(encoding="utf-8")).get("verdicts") or {})
+
+
+def load_reviewed_run_id(path: str | Path) -> str:
+    """Return the evaluation run whose answers the verdicts are for; ValueError if it isn't set."""
+    run_id = (yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}).get("run_id")
+    if not run_id:
+        raise ValueError(f"Set run_id in {path}: the evaluation run whose answers you reviewed")
+    return str(run_id)

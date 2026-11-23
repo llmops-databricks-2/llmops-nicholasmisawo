@@ -1,7 +1,7 @@
 # Your verdicts on the evaluation answers, to check the LLM judge against (lecture 4.3, "Calibrate the judge").
 #
-# After an evaluation run, read each answer below in the experiment's Evaluations tab, with its cited pages,
-# and record whether every figure and claim in it is supported by the FCR or the register:
+# Read each answer in evaluation/review_sheet.md (the run below's dev answers, with their evidence and without
+# the judge's verdicts), and record whether its factual claims are supported by the FCR or the register:
 #
 #   supported              every claim is backed by the evidence
 #   unsupported            a claim contradicts the evidence or goes beyond it
@@ -9,9 +9,11 @@
 #   no_claims              the answer makes no factual claim (a refusal, say)
 #
 # Leave a verdict empty (null) until you've reviewed it; only filled verdicts are compared with the judge.
+# Then run notebooks/04_tracing/judge_review.py, or: databricks bundle run fcr_tracing -t dev --only judge_review
 # Review dev cases only: the holdout is kept back to judge changes, not to tune the judge.
 
-run_id: null          # The evaluation run these verdicts are for
+# The dev evaluation run of fcr_agent version 1 (job run 461977044469071); the judge's verdicts are read from it
+run_id: e788b88f48904c32af1faccc7cc2e87b
 reviewer: null
 verdicts:
   wilton_2024_capital_vs_ecr: null

@@ -7,7 +7,8 @@
 # MAGIC 1. **Evaluate** the agent on the dev and holdout cases with every scorer from 4.3. Each case is a traced
 # MAGIC    request in the agent's experiment, in a session of its own; a follow-up's earlier question is asked
 # MAGIC    in that session first, so its history comes from memory as in a real conversation.
-# MAGIC 2. **Check the judge** against your verdicts in `evaluation/human_labels.yml`, once you've filled them in.
+# MAGIC 2. **Name the dev run to review**: checking the judge against you happens in `judge_review.py`, on that
+# MAGIC    run's answers.
 # MAGIC 3. **Log** the agent (models from code: `agent_model.py`) with both splits' metrics, **register** it as a
 # MAGIC    version of `<catalog>.<schema>.fcr_agent`, and point the `latest-model` alias at it.
 # MAGIC
@@ -35,10 +36,10 @@ from loguru import logger
 
 from fcr_curator.agent import FCRAgent
 from fcr_curator.config import find_project_file, get_widget, load_config
-from fcr_curator.evaluation import SPLITS, load_cases, load_human_verdicts, make_predict_fn, split_records
+from fcr_curator.evaluation import SPLITS, load_cases, make_predict_fn, split_records
 from fcr_curator.mcp import DEV_GENIE_SPACE_ID
 from fcr_curator.registration import Release, log_and_register, prefixed_metrics
-from fcr_curator.scorers import fcr_scorers, judge_agreement
+from fcr_curator.scorers import fcr_scorers
 from fcr_curator.tracing import use_experiment
 
 # COMMAND ----------
@@ -72,13 +73,26 @@ logger.info(f"Evaluating {len(cases)} cases in {experiment.name}, judged by {cfg
 
 predict_fn = make_predict_fn(agent)
 scorers = fcr_scorers(cfg.evaluation.judge_model)
-results = {}
+cases_path = find_project_file(cfg.evaluation.cases_file)
+# What produced these scores, so a later run can be compared like for like: agent, judge, prompt and cases
+evaluation_config = {
+    "agent_model": cfg.llm_endpoint,
+    "judge_model": cfg.evaluation.judge_model,
+    "max_tool_rounds": cfg.agent.max_tool_rounds,
+    "cases_file": cfg.evaluation.cases_file,
+}
+results, run_ids = {}, {}
 for split in SPLITS:
     with mlflow.start_run(
         run_name=f"fcr-eval-{split}-{GIT_SHA[:7]}", tags={**Release(GIT_SHA, JOB_RUN_ID).tags(), "split": split}
-    ):
+    ) as run:
+        mlflow.log_params({**evaluation_config, "cases": len(split_records(cases, split))})
+        mlflow.log_artifact(str(cases_path), "evaluation")
+        mlflow.log_text(cfg.system_prompt, "evaluation/system_prompt.txt")
         results[split] = mlflow.genai.evaluate(data=split_records(cases, split), predict_fn=predict_fn, scorers=scorers)
+        run_ids[split] = run.info.run_id
     logger.info(f"{split}: {results[split].metrics}")
+dev_run_id = run_ids["dev"]
 
 # COMMAND ----------
 
@@ -123,23 +137,16 @@ for split in SPLITS:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Check the judge against your verdicts
+# MAGIC ## 3. Checking the judge
 # MAGIC
-# MAGIC Read each dev answer above in the Evaluations tab, with its cited pages, and record your verdict in
-# MAGIC `evaluation/human_labels.yml`. Then rerun with `register=false`. Only the cases you've reviewed are
-# MAGIC compared; until then, there's nothing to compare.
+# MAGIC Your verdicts must be on the same answers as the judge's, and this run has just produced new ones. So
+# MAGIC the check is separate: set `run_id` in `evaluation/human_labels.yml` to a dev run printed below, review
+# MAGIC its answers (`evaluation/review_sheet.md`), then run `judge_review.py`, which logs the agreement to
+# MAGIC that run.
 
 # COMMAND ----------
 
-human = load_human_verdicts(find_project_file(cfg.evaluation.human_labels_file))
-judge = {row["case"]: row["evidence_support"] for row in case_rows("dev")}
-agreement = judge_agreement(judge, human)
-if agreement.rate is None:
-    logger.warning("No human verdicts yet: the evidence_support judge hasn't been checked against a person")
-else:
-    logger.info(f"Judge agreed with you on {agreement.agreed} of {agreement.compared} dev cases ({agreement.rate:.0%})")
-    for disagreement in agreement.disagreements:
-        logger.info(f"  {disagreement}")
+logger.info(f"Dev evaluation run, for review: {dev_run_id}")
 
 # COMMAND ----------
 
@@ -149,8 +156,6 @@ else:
 # COMMAND ----------
 
 metrics = prefixed_metrics("dev", results["dev"].metrics) | prefixed_metrics("holdout", results["holdout"].metrics)
-if agreement.rate is not None:
-    metrics["judge_human_agreement"] = agreement.rate
 
 if not REGISTER:
     logger.info("register=false: evaluated only")

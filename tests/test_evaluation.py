@@ -7,7 +7,14 @@ import pytest
 from mlflow.pyfunc import ResponsesAgent
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
-from fcr_curator.evaluation import EvalCase, load_cases, load_human_verdicts, make_predict_fn, split_records
+from fcr_curator.evaluation import (
+    EvalCase,
+    load_cases,
+    load_human_verdicts,
+    load_reviewed_run_id,
+    make_predict_fn,
+    split_records,
+)
 
 CASES_FILE = Path(__file__).resolve().parents[1] / "evaluation/fcr_eval_cases.yml"
 # What both splits must cover, so a change is judged on the same kinds of question it was tuned on
@@ -136,3 +143,20 @@ def tracing_on() -> None:
     mlflow.tracing.enable()
     yield
     mlflow.tracing.disable()
+
+
+def test_load_reviewed_run_id_refuses_labels_without_the_run_they_review(tmp_path: Path) -> None:
+    """Verdicts compared against another run's answers would measure nothing, so a missing run_id fails."""
+    path = tmp_path / "labels.yml"
+    path.write_text("run_id: null\nverdicts:\n  wilton: supported\n")
+
+    with pytest.raises(ValueError, match="run_id"):
+        load_reviewed_run_id(path)
+
+
+def test_load_reviewed_run_id_returns_the_named_run(tmp_path: Path) -> None:
+    """The run named in the labels file is the one compared."""
+    path = tmp_path / "labels.yml"
+    path.write_text("run_id: e788b88f\nverdicts: {}\n")
+
+    assert load_reviewed_run_id(path) == "e788b88f"
