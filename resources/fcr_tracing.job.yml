@@ -1,4 +1,4 @@
-# FCR tracing (lecture 4: 4.0 to 4.2)
+# FCR tracing and evaluation (lecture 4: 4.0 to 4.4)
 #
 # The course's lecture4-tracing-evaluation job for this project, its tasks in order, since each needs the one
 # before it:
@@ -7,8 +7,10 @@
 #                           SELECT/MODIFY on the agent's trace tables and check it holds them
 #   tracing_implementation  the tracing APIs, with FCR examples, traced to the demo experiment (dev only)
 #   custom_agent            the FCR agent, traced to its own experiment: one request, then a two-turn session
+#   evaluation_theory       the scorers and judges on fixed answers, to the demo experiment
+#   log_register            evaluate the agent on the dev and holdout cases, then log and register it
 #
-# Evaluation and logging (4.3, 4.4) come later. Runs on demand: no schedule.
+# register=false evaluates without registering, to compare a change. Runs on demand: no schedule.
 #
 # git_sha is the bundle's commit, so each trace names the code that produced it (the course's job hard-codes one).
 
@@ -25,6 +27,10 @@ resources:
           default: ${resources.genie_spaces.fcr-curator-space.id}
         - name: git_sha
           default: ${bundle.git.commit}
+        - name: job_run_id
+          default: "{{job.run_id}}"
+        - name: register
+          default: "true"
       environments:
         - environment_key: default
           spec:
@@ -51,3 +57,17 @@ resources:
           environment_key: default
           notebook_task:
             notebook_path: ../notebooks/04_tracing/custom_agent.py
+
+        - task_key: evaluation_theory
+          depends_on:
+            - task_key: custom_agent
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/04_tracing/evaluation_theory.py
+
+        - task_key: log_register
+          depends_on:
+            - task_key: evaluation_theory
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/04_tracing/log_register.py
