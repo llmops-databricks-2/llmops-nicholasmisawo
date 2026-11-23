@@ -166,10 +166,46 @@ The span tree of the Wilton Re request, as recorded:
 What the trace shows, which the answer alone didn't:
 
 - **The UC function dominates.** `get_fcr_details` took 47 of the 76 seconds, against 1.5 seconds for
-  the search. It runs SQL on the warehouse through MCP, so this is most likely the warehouse starting;
-  the next runs will tell.
+  the search. The warm-run test below shows a cold warehouse explains most of that, but not all of it.
 - **An unneeded Genie call.** Asked about one insurer's capital, the model also asked Genie, adding 14
   seconds and a round. The tool guidance reserves Genie for counts and lists.
 - **The first Lakebase connection costs 5 seconds** (`memory_load`), against 0.3 s for `memory_save` later.
 
 These are leads for evaluation (4.3), not yet fixes.
+
+### A failure, and the step that caused it
+
+Run `916596661469909` (commit `cc7122c`) asked *"Which FCRs has AXA published?"* AXA is a real insurer
+whose short name the tools refuse, since names under four letters match several companies. The trace
+shows where the turn went wrong and how it recovered:
+
+| # | Span | Status | What happened |
+|---|---|---|---|
+| 1 | `get_fcr_details {"insurer": "AXA"}` | **ERROR**, 0.0 s | *"insurer 'AXA' is too short to match one company; give more of its name"*, recorded as the span's exception |
+| 2 | `search_fcr {"query": "AXA"}` | OK, 0.8 s | The model searched the FCR text instead |
+| 3 | `query_space_…` (Genie) | OK, 28.4 s | It asked Genie for insurers with AXA in their name |
+| 4 | `get_fcr_details {"insurer": "AXA Life Bermuda"}` | OK, 6.3 s | It retried with a full name Genie returned |
+
+The turn itself finished OK (43.8 s). Only the refused tool call is marked as an error, so a search for
+failed traces misses it: search the spans instead. The answer found two AXA entities, AXA Life Bermuda
+Limited and AXA XL Reinsurance Ltd, and no FCRs recorded for either. The trace explains the cost: the
+refusal took one wasted round and a 28-second Genie call to recover from. Telling the model to pass full
+registered names (*AXA XL Reinsurance*), or letting the tool suggest matches, would avoid both.
+
+The same answer says no FCRs were "recorded as published". That's closer than the earlier "not filed",
+but the register still only knows what the pipeline found.
+
+### Cold warehouse or slow function?
+
+The same question, *"List the FCRs Wilton Re has published."*, asked twice in a row in that run:
+
+| `get_fcr_details` call | Time |
+|---|---|
+| Earlier runs, the first call in days (warehouse idle) | 46.9 s and 38.1 s |
+| This run's first call (warehouse already started) | 11.6 s |
+| The question asked twice, back to back | 10.0 s, 9.9 s |
+
+So a cold warehouse added roughly 30 seconds, but the warm call still takes about 10 seconds, against
+under a second for `search_fcr`. Both the UC function's SQL and its route through managed MCP are worth
+measuring separately. Genie took 28 to 29 seconds on every call in this run, so it's the slowest tool
+once the warehouse is warm.
