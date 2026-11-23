@@ -124,3 +124,8 @@ def test_skip_without_leaves_out_a_case_missing_the_judges_expectation() -> None
 
     assert (skipped, judged, judge.judged) == (None, True, 1)
     assert wrapped.name == "correctness"
+
+
+def test_figures_in_reads_figures_written_with_narrow_spaces() -> None:
+    """The agent writes '253 %' and '1 156'; those are 253% and 1,156, not separate numbers."""
+    assert figures_in("ECR ratio **253 %**, requirement $1 156 million") == {2.53, 1156.0}

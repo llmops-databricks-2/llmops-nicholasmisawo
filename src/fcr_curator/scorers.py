@@ -30,6 +30,8 @@ FIGURE = re.compile(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|(?<![\w.])\d+(?:\
 YEARS = range(1990, 2101)
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
 DATE = re.compile(rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{MONTHS})\b|\b(?:{MONTHS})\s+\d{{1,2}}\b", re.IGNORECASE)
+# The agent writes narrow and no-break spaces inside figures ("253\u202f%", "1\u202f156"), which aren't separators
+FIGURE_SPACE = re.compile(r"(?<=\d)[\u00a0\u2009\u202f ](?=%|\d{3}\b)")
 PAGE_LINK = re.compile(r"https?://\S+#page=\d+")
 TOOL_MARKUP = ("【", "†")
 EVIDENCE_VERDICTS = ("supported", "unsupported", "insufficient_evidence", "no_claims")
@@ -45,7 +47,7 @@ def figure_value(text: str) -> float:
 def figures_in(text: str) -> set[float]:
     """Return the figures text states, leaving out dates, years and single digits (class numbers, list markers)."""
     found = set()
-    for match in FIGURE.findall(DATE.sub(" ", text)):
+    for match in FIGURE.findall(FIGURE_SPACE.sub("", DATE.sub(" ", text))):
         is_plain_integer = match.isdigit()
         if is_plain_integer and (int(match) in YEARS or len(match) == 1):
             continue
@@ -91,14 +93,15 @@ You check answers about Bermuda insurers' Financial Condition Reports (FCRs) aga
 The question is in {{ inputs }}. The answer is in {{ outputs }}. The evidence is in {{ expectations }}: the
 expected facts, and quotes from the FCR pages or register rows that hold them.
 
-Judge only whether the answer's factual claims (figures, ratios, dates, names, compliance) are backed by
-that evidence, not its tone or completeness. A ratio the answer works out is backed if the figures it uses
-are, and the arithmetic is right to two significant figures. A unit (such as $ millions) the evidence
-doesn't give is a claim beyond it.
+Judge the claims the evidence speaks to: the figures, ratios, years, names and compliance status it
+covers. Each must match the evidence; a ratio the answer works out must use matching figures, with the
+arithmetic right to two significant figures. The answer may also give links, page numbers or context the
+evidence doesn't cover, since the agent read more than these quotes: don't count those against it unless
+they contradict the evidence. Judge support, not tone or completeness.
 
 Return:
-- supported: every factual claim is backed by the evidence
-- unsupported: a claim contradicts the evidence, or goes beyond it
+- supported: every claim the evidence speaks to matches it
+- unsupported: a claim contradicts the evidence, or puts a different figure where the evidence gives one
 - insufficient_evidence: the answer says the information isn't available, and the evidence agrees
 - no_claims: the answer makes no factual claim about insurers (a refusal, or a redirection)"""
 

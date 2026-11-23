@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
+import mlflow
 import yaml
+from mlflow.entities import SpanType
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
 from fcr_curator.agent import response_text
@@ -122,8 +124,13 @@ def make_predict_fn(agent: Agent) -> Callable[..., str]:
 
     A fresh session per case keeps one case's history out of another's; a follow-up's earlier questions are
     asked in its session first, so the agent loads them from memory as it would in a real conversation.
+
+    The function is traced, so each case is one trace with the answer as its output and every turn's spans
+    beneath it. Untraced, MLflow sometimes takes the agent's own predict trace as the case's, and the scorers
+    then read the whole response object rather than the answer.
     """
 
+    @mlflow.trace(span_type=SpanType.CHAIN, name="evaluation_case")
     def predict_fn(question: str, earlier_questions: list[str] | None = None) -> str:
         session_id = f"eval-{uuid4()}"
         for earlier in earlier_questions or []:

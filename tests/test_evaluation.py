@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import mlflow
 import pytest
 from mlflow.pyfunc import ResponsesAgent
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
@@ -117,3 +118,21 @@ def test_load_human_verdicts_reads_the_reviewed_and_unreviewed_cases(tmp_path: P
     path.write_text("verdicts:\n  wilton: supported\n  argo: null\n")
 
     assert load_human_verdicts(path) == {"wilton": "supported", "argo": None}
+
+
+@pytest.mark.usefixtures("tracing_on")
+def test_predict_fn_traces_each_case_with_the_answer_as_its_output() -> None:
+    """One trace per case, its output the answer text, so scorers read the answer and not a response object."""
+    make_predict_fn(RecordingAgent())(question="Wilton Re's 2024 ECR?")
+
+    trace = mlflow.get_trace(mlflow.get_last_active_trace_id(), flush=True)
+    assert trace.data.spans[0].name == "evaluation_case"
+    assert trace.data.spans[0].outputs == "Answer to: Wilton Re's 2024 ECR?"
+
+
+@pytest.fixture
+def tracing_on() -> None:
+    """Trace into the session's temporary store (conftest.py), so the trace can be read back."""
+    mlflow.tracing.enable()
+    yield
+    mlflow.tracing.disable()

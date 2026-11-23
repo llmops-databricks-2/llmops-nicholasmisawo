@@ -66,5 +66,9 @@ cases before comparing results across that change.
   capital was about 4.66 times it. The case `wilton_capital_vs_msm` checks for it.
 - **"Wilton Re" is two companies.** Wilton Reinsurance Bermuda Limited has FCRs for 2022 to 2024; Wilton
   Re International Limited has none. The case `wilton_two_entities` checks the agent tells them apart.
+- **Somerset Re reports 2023 on two bases.** Its 2023 FCR gives an ECR ratio of 218% on the full
+  requirement and 253% on the transitional one; its 2024 FCR gives 253% for 2023. The first baseline
+  failed the agent for answering 218% from the 2023 FCR, which was right: the case was wrong. Both Somerset
+  cases now accept either, as long as the answer says which basis it used.
 - **FCRs state ratios differently.** Argo Re prints its ECR ratio (142%); Wilton Re doesn't. The cases
   check the agent quotes a stated ratio and says when it worked one out.

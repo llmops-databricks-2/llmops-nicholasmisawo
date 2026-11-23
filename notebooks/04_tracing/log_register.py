@@ -25,6 +25,7 @@ if "DATABRICKS_RUNTIME_VERSION" in os.environ:
 
 # COMMAND ----------
 
+import math
 from uuid import uuid4
 
 import mlflow
@@ -99,12 +100,19 @@ SCORES = (
 )
 
 
+def score_cell(value: object) -> str:
+    """Return a score as text: one column type for display, and blank where a scorer skipped the case."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return ""
+    return str(value)
+
+
 def case_rows(split: str) -> list[dict]:
     """Return one row per case: its id, category and each scorer's value."""
     table = results[split].result_df
     return [
         {"case": row["tags"].get("case_id"), "category": row["tags"].get("category")}
-        | {name: row.get(f"{name}/value") for name in SCORES}
+        | {name: score_cell(row.get(f"{name}/value")) for name in SCORES}
         for _, row in table.iterrows()
     ]
 
