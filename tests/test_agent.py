@@ -10,7 +10,7 @@ from mlflow.entities import SpanStatusCode, SpanType
 from mlflow.tracing.constant import SpanAttributeKey
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
-from fcr_curator.agent import NO_ANSWER, FCRAgent, ToolLoop, response_text
+from fcr_curator.agent import FINAL_ANSWER_ATTEMPTS, NO_ANSWER, FCRAgent, ToolLoop, response_text
 from fcr_curator.agent_tools import ToolInputError
 from fcr_curator.config import AgentSettings
 from fcr_curator.mcp import ToolInfo
@@ -186,6 +186,30 @@ def test_loop_falls_back_to_a_fixed_reply_when_even_the_final_request_is_empty()
     client = FakeClient(reply(tool_calls=[tool_call("echo", '{"text": "again"}')]))
 
     assert tool_loop(client).run([{"role": "user", "content": "Loop forever"}]).answer == NO_ANSWER
+
+
+def test_loop_asks_again_without_tools_when_the_model_replies_with_nothing() -> None:
+    """An empty reply isn't an answer: the model is asked to answer in text, and that answer is returned."""
+    client = FakeClient(
+        reply(tool_calls=[tool_call("echo", '{"text": "ECR"}')]),
+        reply(content=""),
+        reply(content="Argo Re's ECR ratio was 142%."),
+    )
+
+    result = tool_loop(client).run([{"role": "user", "content": "Argo Re's ECR ratio?"}])
+
+    assert result.answer == "Argo Re's ECR ratio was 142%."
+    assert client.tool_choices == ["auto", "auto", "none"]
+
+
+def test_loop_gives_the_fixed_reply_when_the_model_stays_empty() -> None:
+    """After FINAL_ANSWER_ATTEMPTS empty replies without tools, the user gets a clear reply, not an empty one."""
+    client = FakeClient(reply(content=None), reply(content="  "), reply(content=""))
+
+    result = tool_loop(client).run([{"role": "user", "content": "Arch's 2024 FCR?"}])
+
+    assert result.answer == NO_ANSWER
+    assert client.tool_choices == ["auto"] + ["none"] * FINAL_ANSWER_ATTEMPTS
 
 
 def test_run_tool_returns_a_bad_argument_as_an_error_for_the_model() -> None:

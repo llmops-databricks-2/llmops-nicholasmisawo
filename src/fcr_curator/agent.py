@@ -11,7 +11,7 @@ Code controls the shape of every turn, and the model makes the decisions within 
 |---|---|
 | Loading the session's last history_messages messages | Whether a question needs a tool at all |
 | Which tools exist, and checking their arguments | Which tool, with what arguments |
-| At most max_tool_rounds rounds of tool calls, then one answer without tools | When it has enough to answer |
+| At most max_tool_rounds rounds of tool calls, then an answer without tools; an empty reply asked again | When it has enough to answer |
 | Running tools; returning a bad call's error to the model | How to recover from that error |
 | Saving the question and answer, not the tool calls | The answer and its citations |
 
@@ -59,6 +59,9 @@ from fcr_curator.tracing import record_token_usage, release_tags
 NO_ANSWER = "I couldn't answer within the tool calls allowed. Please ask a narrower question."
 # Sent when the tool rounds run out, so the turn ends with what was found rather than nothing
 ANSWER_NOW = "You have used all your tool calls. Answer now from what the tools returned, and say plainly what you couldn't find."
+# Sent when the model replies with neither a tool call nor any text, which the gateway's reasoning model sometimes does
+ANSWER_IN_TEXT = "Your last reply was empty. Answer the question now, in text, from what the tools returned."
+FINAL_ANSWER_ATTEMPTS = 2  # Requests without tools for a reply that has text, before the no-answer fallback
 CHAT_ATTEMPTS = 3  # A turn waits at most two minutes for the gateway's rate limit before failing
 SESSION_METADATA = "mlflow.trace.session"  # MLflow groups a session's traces by this key
 OUTPUT_ITEM_DONE = "response.output_item.done"
@@ -137,12 +140,18 @@ class ToolLoop:
     sleep: Callable[[float], None] = time.sleep
 
     def run(self, messages: list[Message]) -> TurnResult:
-        """Return the turn's answer; after max_tool_rounds rounds of tool calls, one given without tools."""
+        """Return the turn's answer; after max_tool_rounds rounds of tool calls, one given without tools.
+
+        A reply with neither tool calls nor text isn't an answer: the model is asked again, without tools.
+        """
         items: list[Message] = []
         for _ in range(self.settings.max_tool_rounds):
             message = self.call_llm(messages)
             if not message.tool_calls:
-                return self.answered(message.content or "", items)
+                if message.content and message.content.strip():
+                    return self.answered(message.content, items)
+                logger.warning("The model replied with neither tool calls nor text; asking it to answer")
+                return self.answered(self.final_answer(messages, ANSWER_IN_TEXT), items)
             messages.append(assistant_tool_calls(message))
             for call in message.tool_calls:
                 result = self.run_tool(call.function.name, call.function.arguments)
@@ -151,8 +160,15 @@ class ToolLoop:
         logger.warning(
             f"No answer after {self.settings.max_tool_rounds} rounds of tool calls; asking for one without tools"
         )
-        final = self.call_llm([*messages, {"role": "system", "content": ANSWER_NOW}], allow_tools=False)
-        return self.answered(final.content or NO_ANSWER, items)
+        return self.answered(self.final_answer(messages, ANSWER_NOW), items)
+
+    def final_answer(self, messages: list[Message], instruction: str) -> str:
+        """Return the first reply with text to instruction, asked without tools; NO_ANSWER if none has any."""
+        for _ in range(FINAL_ANSWER_ATTEMPTS):
+            reply = self.call_llm([*messages, {"role": "system", "content": instruction}], allow_tools=False)
+            if reply.content and reply.content.strip():
+                return reply.content
+        return NO_ANSWER
 
     @staticmethod
     def answered(answer: str, items: list[Message]) -> TurnResult:
