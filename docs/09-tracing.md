@@ -3,13 +3,15 @@
 Every agent request leaves a trace in MLflow: one tree of spans that shows what was loaded, which tools
 the model called with what arguments, what they returned, and how long each step took. This is lecture 4's
 4.0 to 4.2 for this project: trace storage in Unity Catalog, the tracing APIs, and the traced agent.
-Evaluation (4.3) and logging the agent as a model (4.4) come later.
+Evaluation (4.3) and logging the agent as a model (4.4) are in [10 Evaluation](10-evaluation.md).
 
 | Course notebook | Here | Does |
 |---|---|---|
 | 4.0 `uc_traces_setup` | [`notebooks/04_tracing/uc_traces_setup.py`](../notebooks/04_tracing/uc_traces_setup.py) | Binds the experiments to their trace tables; grants the deploy service principal write access |
 | 4.1 `tracing_implementation` | [`notebooks/04_tracing/tracing_implementation.py`](../notebooks/04_tracing/tracing_implementation.py) | The tracing APIs, with FCR examples, traced to a demo experiment |
 | 4.2 `custom_agent` | [`notebooks/04_tracing/custom_agent.py`](../notebooks/04_tracing/custom_agent.py) | The FCR agent, traced: one request, a two-turn session, its traces read back |
+| 4.3 `evaluation_theory` | [`notebooks/04_tracing/evaluation_theory.py`](../notebooks/04_tracing/evaluation_theory.py) | The scorers and judges, on fixed answers ([10 Evaluation](10-evaluation.md)) |
+| 4.4 `log_register` | [`notebooks/04_tracing/log_register.py`](../notebooks/04_tracing/log_register.py) | Evaluates the agent on both splits, then logs and registers it |
 
 The `fcr_tracing` job runs them in order, each needing the one before:
 
@@ -171,7 +173,7 @@ What the trace shows, which the answer alone didn't:
   seconds and a round. The tool guidance reserves Genie for counts and lists.
 - **The first Lakebase connection costs 5 seconds** (`memory_load`), against 0.3 s for `memory_save` later.
 
-These are leads for evaluation (4.3), not yet fixes.
+These were leads for evaluation (4.3); [10 Evaluation](10-evaluation.md) records what it found.
 
 ### A failure, and the step that caused it
 

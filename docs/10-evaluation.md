@@ -72,3 +72,113 @@ cases before comparing results across that change.
   cases now accept either, as long as the answer says which basis it used.
 - **FCRs state ratios differently.** Argo Re prints its ECR ratio (142%); Wilton Re doesn't. The cases
   check the agent quotes a stated ratio and says when it worked one out.
+
+## The scorers
+
+`src/fcr_curator/scorers.py`, shown on fixed answers in `notebooks/04_tracing/evaluation_theory.py` (4.3):
+
+| Scorer | Kind | Checks | Skips |
+|---|---|---|---|
+| `answered` | code | The turn ended with an answer, not the no-answer fallback | |
+| `figures_stated` | code | The share of expected figures stated (245% counts as 2.45) | cases with no figures |
+| `cites_page_urls` | code | An FCR page is linked (a URL with `#page=`) | cases whose evidence is the register |
+| `no_tool_markup` | code | No tool-style citations (【…†…】) copied from tool output | |
+| `correctness` | built-in judge | Each expected fact is in the answer | cases without expected facts |
+| `expectations_guidelines` | built-in judge | The case's own guidelines are followed | cases without guidelines |
+| `evidence_support` | custom judge | The claims the evidence covers match it | |
+
+The judges run on `system.ai.claude-sonnet-5-5`, a different model family from the agent's
+`gpt-oss-120b`, so no model grades its own answers. `evidence_support` returns one of four verdicts
+(`supported`, `unsupported`, `insufficient_evidence`, `no_claims`) rather than the course's 1-to-5
+quality score: a number doesn't make a judge apply a rubric consistently, and a named verdict says what
+went wrong. MLflow's built-in judges fail on a case lacking what they need, so `skip_without` makes them
+skip it instead, as the code scorers do.
+
+Before any review, the judge was checked on fixed answers written to have known verdicts: it rated the
+correct answer `supported`, the agent's own "3.5 times" `unsupported` (working out 4.66 from the MSM), and
+a refusal `no_claims`. Your verdicts on the dev answers go in `evaluation/human_labels.yml`; 4.4 then logs
+how often the judge agrees with you (`judge_human_agreement`). That review hasn't been done yet.
+
+## Results
+
+`notebooks/04_tracing/log_register.py` (4.4) evaluates the agent on both splits, each case in a session of
+its own, then logs and registers it. Means per split:
+
+| Scorer | Baseline dev | After the fix, dev (3 runs) | Baseline holdout | After the fix, holdout (3 runs) |
+|---|---|---|---|---|
+| `answered` | 0.80 | **1.00, 0.90, 0.90** | 0.83 | **1.00, 0.83, 1.00** |
+| `figures_stated` | 0.78 | 0.88, 0.61, 0.78 | 0.75 | 0.75, 0.75, 0.25 |
+| `cites_page_urls` | 0.40 | 0.20, 0.40, 0.20 | 0.50 | 0.50, 0.50, 0.50 |
+| `no_tool_markup` | 0.50 | 0.40, 0.50, 0.50 | 0.50 | 0.67, 0.50, 0.50 |
+| `correctness` | 0.67 | 0.67, 0.56, 0.67 | 0.60 | 0.60, 0.60, 0.60 |
+| `expectations_guidelines` | 0.80 | 1.00, 0.60, 0.80 | 0.80 | 0.80, 0.80, 0.80 |
+
+`evidence_support` returns categories, so MLflow gives it no mean: read its verdicts per case in the
+experiment's Evaluations tab. The third run of the fixed agent is the one registered (below).
+
+### How the baseline was read
+
+The first baseline measured the harness more than the agent. Reading each case and its trace found:
+
+| Looked like | Was | Fixed by |
+|---|---|---|
+| Answers made of `{"tool_choice": null, …}` | MLflow sometimes took the agent's own `predict` trace as the case's, so scorers read the response object | Tracing `predict_fn`, so each case is one trace with the answer as its output |
+| `253 %` not found in "253 %" | The agent writes narrow no-break spaces inside figures | Reading those as part of the figure |
+| True PDF links marked `unsupported` | The judge counted anything beyond the quoted evidence as unsupported | A rubric that judges the claims the evidence covers |
+| The agent wrong about Somerset Re's 2023 ratio | The case was wrong: Somerset reports 2023 on two bases | Accepting either, labelled |
+
+After those, the agent's own largest failure was **no answer at all** in 3 of 16 cases (Argo Re, AXA,
+Arch Reinsurance). The traces showed why: the gateway's reasoning model sometimes ends a turn with neither
+a tool call nor text, which the loop returned as the answer, and for Arch it did so again in the final
+reply after eight rounds searching for an FCR that doesn't exist.
+
+### The one change, and what it did
+
+`f5fe97d`: an empty reply isn't an answer. The model is asked again, without tools, to answer from what
+it found, up to twice, before the no-answer fallback. The change targeted `answered`, and no case was
+empty after it. What's left are "couldn't answer" replies in three of six split runs, where the rounds ran
+out and both final attempts were empty.
+
+The other means moved by up to 0.5 **between runs of the same code**: the job retried the failed task, and
+registration was rerun, which gave three samples of it. With 10 dev and 6 holdout cases, one run can't show whether a change helped beyond
+the failure it targeted; reading the cases can. Comparing changes properly needs several runs per version,
+or more cases.
+
+### What still fails
+
+- **Citations.** About half the answers copy tool-style markers (【…†…】) and most don't link a page,
+  although the prompt says to cite the URL. The next change.
+- **"Not filed" for "not found".** The agent still sometimes says insurers have no published FCR, where the
+  register only knows none was found (`insurers_without_fcr_by_class`, `axa_short_name`).
+- **A wrong figure.** In one run the agent gave Argo Re's ECR ratio as 100% for both years, against the
+  142% and 123% its FCR prints; `figures_stated`, `correctness` and `evidence_support` all caught it.
+- **Ratios worked out without saying so**, and Somerset Re's 2023 figure given without its basis.
+- **Running out of rounds** on a question with no answer (Arch Reinsurance), rather than saying so sooner.
+
+## The registered version
+
+| | |
+|---|---|
+| Model | `llmops_dev.nicholasmisawo.fcr_agent`, version **1**, alias `latest-model` |
+| Logged as | Models from code: `src/fcr_curator/agent_model.py` rebuilds the agent from its `model_config` (the environment, the Genie space and the project config), with the package as `code_paths` |
+| Release tags | `git_sha` `b584a31…`, `job_run_id` `461977044469071`, on the logging run and the version |
+| Metrics | Both splits' means, as `dev/…` and `holdout/…`; `judge_human_agreement` once you've reviewed |
+| Environment | Packed for Model Serving (`env_pack="databricks_model_serving"`) |
+
+Registering deploys nothing and isn't a release gate: version 1 is registered with the scores above, which
+show the citation problems still open. Lecture 5 decides what's good enough to serve.
+
+### Which identity will run it, and what it needs
+
+In this job the agent ran as you. Deployed, it runs as the service principal `sp-deploy-nicholasmisawo-dev`
+(application id `7a6b085a-…`, from the UC secret `databricks_client_id`), which needs:
+
+| Resource | Access | Status |
+|---|---|---|
+| Trace tables `llmops_otel_*`, views `llmops_trace_*` | `SELECT, MODIFY` on the tables, `SELECT` on the views | Granted by 4.0, and checked |
+| Schema `llmops_dev.nicholasmisawo` | `USE CATALOG`, `USE SCHEMA`; `EXECUTE` on `get_fcr_details`; `SELECT` on `fcr_register`, `dim_fcr_entities` | `ALL PRIVILEGES` on the schema, from the course |
+| Gateway services `course_ops.gateway.chat`, `course_ops.gateway.embed` | Query | To check at deployment |
+| Genie space `fcr-curator-space` and warehouse `86722fe1a817f6aa` | `CAN RUN` on the space, `CAN USE` on the warehouse | To check at deployment |
+| Lakebase `lb-llmops-nicholasmisawo` | A database role that reads the synced table and writes `agent_session_messages_<env>` | To check at deployment |
+
+The judges' model (`system.ai.claude-sonnet-5-5`) is only needed where evaluation runs, not by the agent.

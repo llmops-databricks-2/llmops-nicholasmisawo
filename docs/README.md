@@ -25,3 +25,4 @@ Dated snapshots of what was delivered for each lecture, in `submissions/`.
 |---|---|
 | 2 | [The retrieval foundation](submissions/lecture-02-retrieval-foundation.md): processed documents and chunks, chunking strategies compared, the Lakebase synced table, semantic, filtered and hybrid search |
 | 3 | [An agent with tools and memory](submissions/lecture-03-agent.md): three tools (Lakebase pgvector, a UC function through MCP, a custom function) plus Genie, the orchestration diagram, session memory in Lakebase |
+| 4 | [Tracing, evaluation and a registered agent](submissions/lecture-04-mlflow.md): UC trace storage and grants, the traced agent, 16 reviewed evaluation cases, code and LLM-judge scorers, one measured fix, `fcr_agent` version 1 |

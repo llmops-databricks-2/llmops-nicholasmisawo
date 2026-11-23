@@ -98,7 +98,8 @@ Trace it: set up trace storage and grants, then run the tracing examples and the
 `fcr_tracing` job, described in [09 Tracing](docs/09-tracing.md)):
 
 ```bash
-databricks bundle run fcr_tracing -t dev
+databricks bundle run fcr_tracing -t dev                                  # 4.0 to 4.4: traces, evaluation, registration
+databricks bundle run fcr_tracing -t dev --only log_register --params register=false   # evaluate only
 ```
 
 ## Project layout
