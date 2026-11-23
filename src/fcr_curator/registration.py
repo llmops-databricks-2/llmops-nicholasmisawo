@@ -14,10 +14,11 @@ import mlflow
 from mlflow import MlflowClient
 from mlflow.entities.model_registry import ModelVersion
 
-import fcr_curator
 from fcr_curator.config import ProjectConfig
 
 AGENT_MODEL_FILE = "agent_model.py"  # The models-from-code entry point, in the package
+# The package's folder, from this module's path: fcr_curator has no __init__.py, so fcr_curator.__file__ is None
+PACKAGE_DIR = Path(__file__).resolve().parent
 ENV_PACK = "databricks_model_serving"  # Packs the serverless environment with the version, as the course does
 
 
@@ -55,12 +56,11 @@ def log_and_register(
 
     Logging checks the input example by loading the agent and answering it, so it calls the model and tools.
     """
-    package = Path(fcr_curator.__file__).parent
     with mlflow.start_run(run_name=f"fcr-agent-{datetime.now(UTC):%Y-%m-%d}", tags=release.tags()):
         model_info = mlflow.pyfunc.log_model(
             name="agent",
-            python_model=str(package / AGENT_MODEL_FILE),
-            code_paths=[str(package)],
+            python_model=str(PACKAGE_DIR / AGENT_MODEL_FILE),
+            code_paths=[str(PACKAGE_DIR)],
             input_example=input_example,
             model_config=agent_model_config(config, env, genie_space_id),
         )

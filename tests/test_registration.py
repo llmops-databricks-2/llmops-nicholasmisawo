@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from fcr_curator.config import ProjectConfig
-from fcr_curator.registration import Release, agent_model_config, prefixed_metrics
+from fcr_curator.registration import AGENT_MODEL_FILE, PACKAGE_DIR, Release, agent_model_config, prefixed_metrics
 
 PROJECT_CONFIG = Path(__file__).resolve().parents[1] / "project_config.yml"
 
@@ -33,3 +33,8 @@ def test_registered_model_name_is_in_the_environments_schema() -> None:
     names = {env: ProjectConfig.from_yaml(str(PROJECT_CONFIG), env).registered_model_name for env in ("dev", "prd")}
 
     assert names == {"dev": "llmops_dev.nicholasmisawo.fcr_agent", "prd": "llmops_prd.nicholasmisawo.fcr_agent"}
+
+
+def test_the_logged_entry_point_is_in_the_package_folder() -> None:
+    """log_model is given a real file: the package has no __init__.py, so its __file__ can't be used."""
+    assert (PACKAGE_DIR / AGENT_MODEL_FILE).is_file()
