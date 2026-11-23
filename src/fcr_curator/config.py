@@ -38,6 +38,17 @@ class TracingSettings(BaseModel):
     )
 
 
+class EvaluationSettings(BaseModel):
+    """How the agent is evaluated, logged and registered, shared by every environment."""
+
+    cases_file: str = Field(..., description="The reviewed evaluation cases, relative to the project root")
+    human_labels_file: str = Field(..., description="Your verdicts on the judge's cases, to check it against")
+    judge_model: str = Field(..., description="Gateway model service the LLM judges run on")
+    max_workers: int = Field(..., gt=0, description="Cases evaluated at once")
+    model_name: str = Field(..., description="Registered model name, within <catalog>.<schema>")
+    model_alias: str = Field(..., description="Alias pointed at each newly registered version")
+
+
 class ProjectConfig(BaseModel):
     """Project configuration model."""
 
@@ -63,6 +74,7 @@ class ProjectConfig(BaseModel):
     system_prompt: str = Field(..., description="System prompt for the FCR agent, read from system_prompt_file")
     agent: AgentSettings = Field(..., description="Limits on the agent's turns and tools")
     tracing: TracingSettings = Field(..., description="Unity Catalog trace storage and its writer")
+    evaluation: EvaluationSettings = Field(..., description="Evaluation, logging and registration")
 
     model_config = {"populate_by_name": True}
 
@@ -91,7 +103,7 @@ class ProjectConfig(BaseModel):
         # The usage policy is shared by every environment, so it sits at the top level of the file
         if "usage_policy_id" in config_data:
             env_config["usage_policy_id"] = config_data["usage_policy_id"]
-        for shared in ("agent", "tracing"):
+        for shared in ("agent", "tracing", "evaluation"):
             if shared in config_data:
                 env_config[shared] = config_data[shared]
         # The prompt is shared too, and kept in its own file (prompts/), relative to this one
@@ -110,6 +122,11 @@ class ProjectConfig(BaseModel):
     def experiment_name(self) -> str:
         """Return the agent's experiment, as the course's config names it."""
         return self.experiment_path
+
+    @property
+    def registered_model_name(self) -> str:
+        """Return the agent's Unity Catalog model name."""
+        return f"{self.catalog}.{self.db_schema}.{self.evaluation.model_name}"
 
     @property
     def full_schema_name(self) -> str:

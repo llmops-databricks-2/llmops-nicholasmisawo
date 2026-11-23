@@ -27,6 +27,16 @@ tracing:
   demo_table_prefix: llmops_demo
   service_principal_secret: databricks_client_id   # The deploy service principal, granted write access by 4.0
 
+# Evaluating, logging and registering the agent (src/fcr_curator/evaluation.py, scorers.py; lecture 4.3 and 4.4).
+evaluation:
+  cases_file: evaluation/fcr_eval_cases.yml
+  human_labels_file: evaluation/human_labels.yml
+  # A different model family from the agent's (gpt-oss-120b): a judge shouldn't grade its own model's answers
+  judge_model: system.ai.claude-sonnet-5-5
+  max_workers: 2            # Cases run at once; the agent's gateway allows 60 requests a minute per user
+  model_name: fcr_agent     # Registered as <catalog>.<schema>.fcr_agent
+  model_alias: latest-model
+
 # Lakebase projects may be shared across environments; Unity Catalog
 # schemas remain separate. Your cohort provisions the Lakebase values below.
 

@@ -4,11 +4,16 @@ The cases live in evaluation/fcr_eval_cases.yml, reviewed by hand. Each has a sp
 and fixing failures, holdout cases are kept back to judge whether a change helped (lecture 4.3).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+from uuid import uuid4
 
 import yaml
+from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
+
+from fcr_curator.agent import response_text
 
 SPLITS = ("dev", "holdout")
 CATEGORIES = (
@@ -93,3 +98,41 @@ def split_records(cases: tuple[EvalCase, ...], split: str) -> list[dict[str, Any
     if split not in SPLITS:
         raise ValueError(f"split {split!r} isn't one of {SPLITS}")
     return [case.record() for case in cases if case.split == split]
+
+
+class Agent(Protocol):
+    """What evaluation needs of the agent: to answer a request."""
+
+    def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+        """Answer the request."""
+        ...
+
+
+def ask(agent: Agent, question: str, session_id: str) -> str:
+    """Ask one question in the session, with a request id of its own, and return the answer's text."""
+    request = ResponsesAgentRequest(
+        input=[{"role": "user", "content": question}],
+        custom_inputs={"session_id": session_id, "request_id": f"req-{uuid4()}"},
+    )
+    return response_text(agent.predict(request))
+
+
+def make_predict_fn(agent: Agent) -> Callable[..., str]:
+    """Return mlflow.genai.evaluate's predict_fn: each case in a new session, its earlier questions first.
+
+    A fresh session per case keeps one case's history out of another's; a follow-up's earlier questions are
+    asked in its session first, so the agent loads them from memory as it would in a real conversation.
+    """
+
+    def predict_fn(question: str, earlier_questions: list[str] | None = None) -> str:
+        session_id = f"eval-{uuid4()}"
+        for earlier in earlier_questions or []:
+            ask(agent, earlier, session_id)
+        return ask(agent, question, session_id)
+
+    return predict_fn
+
+
+def load_human_verdicts(path: str | Path) -> dict[str, str | None]:
+    """Return a reviewer's verdicts by case id; None where a case hasn't been reviewed yet."""
+    return dict(yaml.safe_load(Path(path).read_text(encoding="utf-8")).get("verdicts") or {})

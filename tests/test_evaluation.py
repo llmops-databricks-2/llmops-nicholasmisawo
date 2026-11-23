@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from mlflow.pyfunc import ResponsesAgent
+from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
-from fcr_curator.evaluation import EvalCase, load_cases, split_records
+from fcr_curator.evaluation import EvalCase, load_cases, load_human_verdicts, make_predict_fn, split_records
 
 CASES_FILE = Path(__file__).resolve().parents[1] / "evaluation/fcr_eval_cases.yml"
 # What both splits must cover, so a change is judged on the same kinds of question it was tuned on
@@ -71,3 +73,47 @@ def test_two_cases_with_one_id_are_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="twice"):
         load_cases(path)
+
+
+class RecordingAgent:
+    """Answers every question with its own text, recording each request's session and question."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def predict(self, request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+        """Echo the question back as the answer."""
+        question = request.input[0].content
+        self.calls.append((request.custom_inputs["session_id"], question))
+        item = ResponsesAgent.create_text_output_item(f"Answer to: {question}", "msg_0")
+        return ResponsesAgentResponse(output=[item])
+
+
+def test_predict_fn_asks_a_follow_ups_earlier_questions_first_in_the_same_session() -> None:
+    """The follow-up is answered in the session its earlier question was asked in, and its answer returned."""
+    agent = RecordingAgent()
+
+    answer = make_predict_fn(agent)(question="And the year before?", earlier_questions=["Wilton Re's 2024 ECR?"])
+
+    assert [question for _, question in agent.calls] == ["Wilton Re's 2024 ECR?", "And the year before?"]
+    assert len({session for session, _ in agent.calls}) == 1
+    assert answer == "Answer to: And the year before?"
+
+
+def test_predict_fn_gives_each_case_a_session_of_its_own() -> None:
+    """One case's history never reaches another's."""
+    agent = RecordingAgent()
+    predict_fn = make_predict_fn(agent)
+
+    predict_fn(question="First case")
+    predict_fn(question="Second case")
+
+    assert agent.calls[0][0] != agent.calls[1][0]
+
+
+def test_load_human_verdicts_reads_the_reviewed_and_unreviewed_cases(tmp_path: Path) -> None:
+    """Unreviewed cases come back as None, so they're left out of the comparison."""
+    path = tmp_path / "labels.yml"
+    path.write_text("verdicts:\n  wilton: supported\n  argo: null\n")
+
+    assert load_human_verdicts(path) == {"wilton": "supported", "argo": None}
