@@ -51,6 +51,7 @@ and every citation opens the PDF at the cited page. The design, and what we foun
 | [07 Context engineering](docs/07-context-engineering.md) | Every strategy that shapes what the model sees |
 | [08 Agent](docs/08-agent.md) | The agent's tools, orchestration and session memory in Lakebase |
 | [09 Tracing](docs/09-tracing.md) | Traces in Unity Catalog, who can write them, and the traced agent |
+| [10 Evaluation](docs/10-evaluation.md) | Evaluation cases, scorers and results |
 
 ## Quick start
 

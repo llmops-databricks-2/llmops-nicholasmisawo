@@ -188,8 +188,8 @@ as the course's 3.2b does.
   tool guidance, to ask Genie in plain English, brought it to 1.
 - **Found isn't filed**: the agent described insurers with no FCR in the register as not having *filed*
   one; the register only knows the pipeline hasn't *found* one.
-- **Not yet verified**: answers label the figures "US$ million", which hasn't been checked against the
-  PDFs.
+- **Verified since**: answers label Wilton Re's figures "US$ million", which its FCR confirms ("in $
+  millions", page 15). Not every FCR names its unit, though; see [10 Evaluation](10-evaluation.md).
 
 The demo was run again after the review changes (2026-11-16): the same 2.45 and 2.84 times, with two
 problems to address later.

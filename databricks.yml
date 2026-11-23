@@ -19,6 +19,7 @@ sync:
   include:
     - project_config.yml
     - prompts/*.txt
+    - evaluation/*.yml
 
 # Set once here and referenced by every job, so the policy id isn't repeated per resource
 variables:
