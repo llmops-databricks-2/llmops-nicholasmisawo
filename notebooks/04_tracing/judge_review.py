@@ -32,7 +32,7 @@ from fcr_curator.tracing import use_experiment
 # Settings
 
 ENV = get_widget("env", "dev")
-cfg = load_config("../../project_config.yml", env=ENV)
+cfg = load_config("project_config.yml", env=ENV)  # Found from the repo root or this folder
 labels_path = find_project_file(cfg.evaluation.human_labels_file)
 human = load_human_verdicts(labels_path)
 RUN_ID = load_reviewed_run_id(labels_path)

@@ -29,6 +29,7 @@ from fcr_curator.config import ProjectConfig
 SQL_WAREHOUSE_ENV = "MLFLOW_TRACING_SQL_WAREHOUSE_ID"
 TABLE_PRIVILEGES = (Privilege.SELECT, Privilege.MODIFY)
 VIEW_PRIVILEGES = (Privilege.SELECT,)
+DATABRICKS_TRACKING_URI = "databricks"
 UNSET = "local"  # Release tags outside a deployment, so local runs are still distinguishable
 # What MLflow creates per prefix: <prefix>_otel_{spans,logs,metrics,annotations} and <prefix>_trace_{metadata,unified}
 TRACE_OBJECT_KINDS = ("otel", "trace")
@@ -128,8 +129,13 @@ def missing_trace_access(workspace: WorkspaceClient, grants: Iterable[TraceGrant
 
 
 def use_experiment(config: ProjectConfig, experiment_name: str) -> Experiment:
-    """Send this process's traces to experiment_name, and let it search them through the config's warehouse."""
+    """Send this process's traces to experiment_name, and let it search them through the config's warehouse.
+
+    The tracking URI is set to the workspace explicitly: on Databricks it already is, but a script run from
+    a laptop would otherwise write to a local ./mlflow.db and find none of the workspace's runs.
+    """
     os.environ[SQL_WAREHOUSE_ENV] = config.warehouse_id
+    mlflow.set_tracking_uri(DATABRICKS_TRACKING_URI)
     return mlflow.set_experiment(experiment_name)
 
 
