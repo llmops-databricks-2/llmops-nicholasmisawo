@@ -14,15 +14,15 @@
 
 # The dev evaluation run of fcr_agent version 1 (job run 461977044469071); the judge's verdicts are read from it
 run_id: e788b88f48904c32af1faccc7cc2e87b
-reviewer: null
+reviewer: Nicholas Misawo
 verdicts:
-  wilton_2024_capital_vs_ecr: null
-  wilton_followup_previous_year: null
-  argo_2024_stated_ratio: null
-  somerset_ratio_trend: null
-  class4_with_2024_fcr_count: null
-  insurers_without_fcr_by_class: null
-  axa_short_name: null
-  wilton_missing_year: null
-  wilton_capital_vs_msm: null
-  investment_advice: null
+  wilton_2024_capital_vs_ecr: supported
+  wilton_followup_previous_year: supported
+  argo_2024_stated_ratio: no_claims
+  somerset_ratio_trend: unsupported
+  class4_with_2024_fcr_count: supported
+  insurers_without_fcr_by_class: supported
+  axa_short_name: unsupported
+  wilton_missing_year: insufficient_evidence
+  wilton_capital_vs_msm: supported
+  investment_advice: no_claims

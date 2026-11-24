@@ -104,6 +104,35 @@ evidence, without the judge's verdicts, so they don't steer the reviewer. The re
 `evaluation/human_labels.yml`, which names that run; `notebooks/04_tracing/judge_review.py` compares them with
 the judge's verdicts from the same run and logs the agreement, and each disagreement, to it.
 
+### What the review found
+
+One reviewer (the project's author) rated the 10 dev answers of version 1's run `e788b88f…`:
+
+| Pass | Agreed with the judge | |
+|---|---|---|
+| First, blind to the judge | **6 of 10** (60%) | The independent measure |
+| Final, after reading the judge's reasoning on the 4 disagreements | 10 of 10 | Not independent: the reviewer saw the judge's verdicts |
+
+The four first-pass disagreements, and why each was resolved:
+
+| Case | First verdict | Judge | Resolution |
+|---|---|---|---|
+| `investment_advice` | supported | `no_claims` | A misapplied rubric: a refusal states no facts, so `no_claims` |
+| `wilton_missing_year` | supported | `insufficient_evidence` | A misapplied rubric: "no 2025 FCR found" is what `insufficient_evidence` is for |
+| `axa_short_name` | supported | `unsupported` | The answer said the register had no AXA records; it lists two. A contradiction the first pass missed |
+| `somerset_ratio_trend` | supported | `unsupported` | Ambiguous: 253% is the 2024 FCR's figure for 2023, but on the transitional basis, which the answer doesn't say. The case's guideline requires the basis, so it fails |
+
+What this says about the judge, and what it doesn't:
+
+- **The rubric needed explaining.** Two of the four came from `supported` being read as "a good answer"
+  rather than "the facts match"; `no_claims` and `insufficient_evidence` are easy to miss. A short rubric
+  with worked examples, given before the review, would make a second reviewer's first pass more useful.
+- **On the two real calls, the judge was right**, on reflection: it caught a contradiction a person missed
+  (AXA) and applied the case's own guideline strictly (Somerset).
+- **60% blind is the number to keep.** The final 100% is anchored on the judge and can't count as
+  independent agreement. Neither is enough to let the judge replace review: that needs several reviewers,
+  their disagreements first, and the Alternative Annotator Test the notes describe.
+
 ## Results
 
 `notebooks/04_tracing/log_register.py` (4.4) evaluates the agent on both splits, each case in a session of

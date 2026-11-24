@@ -14,7 +14,7 @@ course notebook (4.0 to 4.4).
 | 2. Cases with expected behaviour and context, including a follow-up, missing evidence and a known failure | 16 reviewed cases, 10 dev and 6 holdout, each with the FCR pages or register rows behind it | `evaluation/fcr_eval_cases.yml` |
 | 2. A deterministic check and a task-specific judge | 4 code scorers; MLflow's correctness and per-case guideline judges; a custom `evidence_support` judge | `src/fcr_curator/scorers.py` |
 | 2. Read outputs and rationales; a case a superficial check passes wrongly | The "3.5 times" answer states a correct figure, so `figures_stated` gives it credit; only the judges catch the wrong ratio. In version 1's run, `wilton_2024_capital_vs_ecr` scores 1.00 on figures but fails its guideline (the ratio isn't flagged as worked out) | [Evidence](../evidence/lecture-04-evaluation.md) |
-| 2. Review the judge against human decisions; a holdout for changes | A blind review sheet of version 1's dev answers; your verdicts compared with the judge's on the same answers (`judge_review`), disagreements logged to the run. Holdout kept apart | `evaluation/review_sheet.md`, `evaluation/human_labels.yml` |
+| 2. Review the judge against human decisions; a holdout for changes | A blind review of version 1's 10 dev answers: **6 of 10** agreed with the judge. Of the 4 disagreements, 2 were a misread rubric and 2 real calls where the judge was right on reflection (final 10/10, no longer independent). Holdout kept apart | [10 Evaluation](../10-evaluation.md#what-the-review-found) |
 | 3. Log code, configuration and metrics; register a version | `fcr_agent` version 1, from code, with both splits' metrics and the release tags; alias `latest-model` | [10 Evaluation](../10-evaluation.md#the-registered-version) |
 | 3. Which identity runs it, and what it must reach | The deploy service principal, and each resource with its access and status | [10 Evaluation](../10-evaluation.md#which-identity-will-run-it-and-what-it-needs) |
 | 3. Concrete version, configuration and limitations | Version 1 at commit `b584a31`, job run `461977044469071`; what still fails, below | This page |
@@ -81,6 +81,7 @@ URLs and user names left out. The success and failure traces are in [09 Tracing]
 - **Running out of rounds** on questions with no answer, rather than saying so sooner.
 - **Run-to-run variation.** The means moved by up to 0.5 between runs of the same code. One run per version
   can't show a change helped beyond the failure it targeted, so comparisons need several runs, or more cases.
-- **One reviewer.** The judge is checked against one person's verdicts. The notes ask for several reviewers,
-  and their disagreements, before treating any one as ground truth; that, and the Alternative Annotator Test,
-  would be needed before letting the judge replace review.
+- **The judge isn't validated to replace review.** One reviewer agreed with it on 6 of 10 answers blind.
+  Two of the four disagreements came from the rubric being misread, so the next review starts from worked
+  examples. Replacing review would need several reviewers, their disagreements first, and the Alternative
+  Annotator Test.
