@@ -47,17 +47,27 @@ def gateway_embedder(client: OpenAI, model_service: str, sleep: Callable[[float]
     """
 
     def embed(texts: list[str]) -> list[list[float]]:
-        for attempt in range(1, EMBED_ATTEMPTS):
-            try:
-                return _embed_batch(client, model_service, texts)
-            except RateLimitError:
-                logger.warning(
-                    f"Rate limited by {model_service}, attempt {attempt}; waiting {RATE_LIMIT_WAIT_SECONDS}s"
-                )
-                sleep(RATE_LIMIT_WAIT_SECONDS)
-        return _embed_batch(client, model_service, texts)
+        return retry_when_rate_limited(
+            lambda: _embed_batch(client, model_service, texts), model_service, EMBED_ATTEMPTS, sleep
+        )
 
     return embed
+
+
+def retry_when_rate_limited[T](
+    call: Callable[[], T], model_service: str, attempts: int, sleep: Callable[[float], None] = time.sleep
+) -> T:
+    """Return call(), waiting for the next minute's allowance each time model_service rate-limits it.
+
+    Bounded: after `attempts` tries the RateLimitError propagates, so a caller fails rather than waiting forever.
+    """
+    for attempt in range(1, attempts):
+        try:
+            return call()
+        except RateLimitError:
+            logger.warning(f"Rate limited by {model_service}, attempt {attempt}; waiting {RATE_LIMIT_WAIT_SECONDS}s")
+            sleep(RATE_LIMIT_WAIT_SECONDS)
+    return call()
 
 
 def _embed_batch(client: OpenAI, model_service: str, texts: list[str]) -> list[list[float]]:

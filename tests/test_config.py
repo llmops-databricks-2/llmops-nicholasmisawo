@@ -104,3 +104,26 @@ def test_get_widget_falls_back_to_the_default_when_missing_or_empty(monkeypatch:
     use_widgets(monkeypatch, {"genie_space_id": ""})
 
     assert (get_widget("env", "dev"), get_widget("genie_space_id", "dev-space")) == ("dev", "dev-space")
+
+
+def test_project_config_gives_every_environment_the_trace_storage_and_writer() -> None:
+    """The agent's and the demos' trace tables have separate prefixes, shared by every environment."""
+    for env in ("dev", "acc", "prd"):
+        tracing = ProjectConfig.from_yaml(str(PROJECT_CONFIG), env).tracing
+
+        assert (tracing.table_prefix, tracing.demo_table_prefix, tracing.service_principal_secret) == (
+            "llmops",
+            "llmops_demo",
+            "databricks_client_id",
+        )
+
+
+def test_project_config_keeps_the_tracing_demos_in_their_own_dev_experiment() -> None:
+    """Dev's demo experiment differs from its agent experiment; acc and prd have no demos."""
+    dev = ProjectConfig.from_yaml(str(PROJECT_CONFIG), "dev")
+
+    assert (dev.experiment_name, dev.demo_experiment_path) == (
+        "/llmops/nicholasmisawo-dev",
+        "~/nicholasmisawo-dev-demos",
+    )
+    assert ProjectConfig.from_yaml(str(PROJECT_CONFIG), "acc").demo_experiment_path is None

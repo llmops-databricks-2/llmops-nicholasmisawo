@@ -11,12 +11,19 @@ tool, a notebook) needs only a question and, optionally, filters:
 It also sets up the synced table for search: pgvector (ensure_extension) and a full-text index
 (ensure_indexes). The sync owns the table's rows; the index is the only thing added to it.
 
+hybrid_search, the agent's retrieval, is a RETRIEVER span: its passages are recorded as MLflow Documents, the
+shape retrieval judges (groundedness, relevance) read from a trace.
+
 It loads psycopg. On Databricks, set PSYCOPG_IMPL=python before importing it (notebooks/03_agent do), since
 psycopg's binary build aborts Python on serverless compute; its pure-Python build works there.
 """
 
+from dataclasses import asdict
+
+import mlflow
 from databricks.sdk import WorkspaceClient
 from loguru import logger
+from mlflow.entities import Document, SpanType
 from psycopg import sql
 
 from fcr_curator.config import ProjectConfig
@@ -90,6 +97,23 @@ class LakebasePgVectorManager:
         self, query: str, filters: SearchFilters = NO_FILTERS, limit: int = DEFAULT_LIMIT
     ) -> list[SearchHit]:
         """Return the semantic and keyword matches for query, within filters, fused by rank."""
-        query_vector = self.embed_query(query)
-        with connect(self.workspace, self.config) as connection:
-            return ChunkSearch(connection, self.table).hybrid(query, query_vector, filters, limit)
+        with mlflow.start_span(name="hybrid_search", span_type=SpanType.RETRIEVER) as span:
+            span.set_inputs({"query": query, "filters": asdict(filters), "limit": limit})
+            query_vector = self.embed_query(query)
+            with connect(self.workspace, self.config) as connection:
+                hits = ChunkSearch(connection, self.table).hybrid(query, query_vector, filters, limit)
+            span.set_outputs([hit_document(hit) for hit in hits])
+            return hits
+
+
+def hit_document(hit: SearchHit) -> Document:
+    """Return a search hit as the MLflow Document a RETRIEVER span records: its text, and where to cite it."""
+    metadata = {
+        "insurer": hit.company,
+        "reporting_year": hit.reporting_year,
+        "fcr_class": hit.fcr_class,
+        "page": hit.page,
+        "doc_uri": hit.citation_url,
+        "score": hit.score,
+    }
+    return Document(page_content=hit.text, metadata=metadata, id=hit.id)

@@ -14,6 +14,8 @@ spans them. Each stage page explains how it works, then records the findings fro
 | [06 Search](06-search.md) | Semantic, filtered, keyword and hybrid search, reranking, query rewriting, the token budget |
 | [07 Context engineering](07-context-engineering.md) | Every strategy that controls what reaches the model, and where it lives |
 | [08 Agent](08-agent.md) | The agent's tools, orchestration (a Mermaid sequence diagram) and session memory |
+| [09 Tracing](09-tracing.md) | Traces in Unity Catalog, who can write them, the traced agent's span tree, and where it differs from the course |
+| [10 Evaluation](10-evaluation.md) | The agent's evaluation cases, where their expected answers come from, and the scorers |
 
 ## Submissions
 
@@ -23,3 +25,4 @@ Dated snapshots of what was delivered for each lecture, in `submissions/`.
 |---|---|
 | 2 | [The retrieval foundation](submissions/lecture-02-retrieval-foundation.md): processed documents and chunks, chunking strategies compared, the Lakebase synced table, semantic, filtered and hybrid search |
 | 3 | [An agent with tools and memory](submissions/lecture-03-agent.md): three tools (Lakebase pgvector, a UC function through MCP, a custom function) plus Genie, the orchestration diagram, session memory in Lakebase |
+| 4 | [Tracing, evaluation and a registered agent](submissions/lecture-04-mlflow.md): UC trace storage and grants, the traced agent, 16 reviewed evaluation cases, code and LLM-judge scorers, one measured fix, `fcr_agent` version 1 |

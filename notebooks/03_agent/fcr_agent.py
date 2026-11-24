@@ -35,13 +35,11 @@ from uuid import uuid4
 
 from databricks.sdk import WorkspaceClient
 from loguru import logger
+from mlflow.types.responses import ResponsesAgentRequest
 
-from fcr_curator.agent import FCRAgent
-from fcr_curator.agent_tools import build_fcr_tools
+from fcr_curator.agent import FCRAgent, response_text
 from fcr_curator.config import get_widget, load_config
-from fcr_curator.gateway import gateway_client
 from fcr_curator.mcp import DEV_GENIE_SPACE_ID
-from fcr_curator.memory import LakebaseMemory
 
 # COMMAND ----------
 # Settings
@@ -54,21 +52,22 @@ QUESTIONS = (
 )
 
 cfg = load_config("project_config.yml", env=ENV)
-workspace = WorkspaceClient()
-tools = build_fcr_tools(workspace, cfg, ENV, GENIE_SPACE_ID)
-memory = LakebaseMemory(workspace, cfg, ENV)
-agent = FCRAgent(gateway_client(workspace), cfg.llm_endpoint, cfg.system_prompt, tuple(tools), memory, cfg.agent)
-logger.info(f"Tools: {[tool.name for tool in tools]}")
+agent = FCRAgent.from_config(cfg, ENV, GENIE_SPACE_ID, WorkspaceClient())
+logger.info(f"Tools: {list(agent.loop.tools_by_name)}")
 
 # COMMAND ----------
 # Two turns of one session; the second relies on the history saved by the first
 
 session_id = f"demo-{uuid4()}"
 for question in QUESTIONS:
-    logger.info(f"\nQ: {question}\n\nA: {agent.answer(question, session_id)}")
+    request = ResponsesAgentRequest(
+        input=[{"role": "user", "content": question}],
+        custom_inputs={"session_id": session_id, "request_id": f"req-{uuid4()}"},
+    )
+    logger.info(f"\nQ: {question}\n\nA: {response_text(agent.predict(request))}")
 
 # COMMAND ----------
 # What the session table now holds for the next turn
 
-for message in memory.load_messages(session_id, cfg.agent.history_messages):
+for message in agent.memory.load_messages(session_id, cfg.agent.history_messages):
     logger.info(f"{message['role']}: {message['content'][:120]!r}")
